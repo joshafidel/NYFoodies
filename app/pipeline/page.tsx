@@ -1,20 +1,61 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { DealCard } from "@/components/DealCard";
-import { useDeals } from "@/lib/store";
-import { Deal, STAGES, Stage } from "@/lib/types";
+import { formatDistance } from "@/lib/geo";
+import { labelForTag } from "@/lib/cuisines";
+import { useDeals, useSettings } from "@/lib/store";
+import { Deal, Place, STAGES, Stage } from "@/lib/types";
 
 export default function PipelinePage() {
   const store = useDeals();
   const { deals, loaded, updateDeal, addDeal } = store;
+  const { settings } = useSettings();
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<Stage | null>(null);
+
+  // verified-only manual add (typeahead against real places)
   const [showAdd, setShowAdd] = useState(false);
-  const [manualName, setManualName] = useState("");
-  const [manualHandle, setManualHandle] = useState("");
+  const [addQuery, setAddQuery] = useState("");
+  const [addResults, setAddResults] = useState<Place[]>([]);
+  const [addSearching, setAddSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (addQuery.trim().length < 2) {
+      setAddResults([]);
+      setAddSearching(false);
+      return;
+    }
+    setAddSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const bias = settings.defaultLocation
+          ? `&lat=${settings.defaultLocation.lat}&lon=${settings.defaultLocation.lon}`
+          : "";
+        const res = await fetch(
+          `/api/place-search?q=${encodeURIComponent(addQuery.trim())}${bias}`
+        );
+        const json = await res.json();
+        setAddResults(json.results ?? []);
+      } catch {
+        setAddResults([]);
+      } finally {
+        setAddSearching(false);
+      }
+    }, 350);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [addQuery, settings.defaultLocation]);
+
+  const inPipeline = useMemo(
+    () => new Set(deals.map((d) => d.sourceId).filter(Boolean)),
+    [deals]
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -41,81 +82,122 @@ export default function PipelinePage() {
     setDragOver(null);
   }
 
-  function addManual() {
-    if (!manualName.trim()) return;
+  function addVerified(p: Place) {
     addDeal({
-      name: manualName.trim(),
-      instagramHandle: manualHandle.trim().replace(/^@/, "") || undefined,
-      cuisines: [],
+      name: p.name,
+      address: p.address,
+      lat: p.lat,
+      lon: p.lon,
+      cuisines: p.cuisines,
+      website: p.website,
+      phone: p.phone,
+      instagramHandle: p.instagramHandle,
+      sourceId: p.id,
     });
-    setManualName("");
-    setManualHandle("");
+    setAddQuery("");
+    setAddResults([]);
     setShowAdd(false);
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-xl font-bold tracking-tight">Pipeline</h1>
-        <span className="text-sm text-muted">
+        <h1 className="text-lg font-bold tracking-tight">Pipeline</h1>
+        <span className="text-xs text-muted">
           {loaded ? `${deals.length} place${deals.length === 1 ? "" : "s"}` : ""}
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by name, @handle, cuisine…"
-            className="w-64"
-          />
-          <button className="btn" onClick={() => setShowAdd((v) => !v)}>
-            + Add manually
-          </button>
-        </div>
+        <button
+          className="btn ml-auto text-xs"
+          onClick={() => {
+            setShowAdd((v) => !v);
+            setAddQuery("");
+            setAddResults([]);
+          }}
+        >
+          {showAdd ? "✕ Close" : "+ Add place"}
+        </button>
       </div>
 
+      <input
+        className="w-full"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Filter by name, @handle, cuisine…"
+      />
+
       {showAdd && (
-        <div className="card flex flex-wrap items-end gap-2 p-4">
-          <label className="flex flex-col gap-1 text-xs font-medium text-muted">
-            Place name
-            <input
-              value={manualName}
-              onChange={(e) => setManualName(e.target.value)}
-              placeholder="Lucali"
-              autoFocus
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-muted">
-            Instagram handle (optional)
-            <input
-              value={manualHandle}
-              onChange={(e) => setManualHandle(e.target.value)}
-              placeholder="@lucali_bk"
-              onKeyDown={(e) => e.key === "Enter" && addManual()}
-            />
-          </label>
-          <button className="btn btn-primary" onClick={addManual}>
-            Add
-          </button>
+        <div className="card space-y-2 p-3">
+          <div className="text-xs font-medium text-muted">
+            Search for a real place — results appear as you type. Only verified places can
+            enter the pipeline.
+          </div>
+          <input
+            className="w-full"
+            value={addQuery}
+            onChange={(e) => setAddQuery(e.target.value)}
+            placeholder="Start typing a restaurant or bar name…"
+            autoFocus
+          />
+          {addSearching && <div className="text-xs text-muted">Searching…</div>}
+          {!addSearching && addQuery.trim().length >= 2 && addResults.length === 0 && (
+            <div className="text-xs text-muted">
+              No verified places match — check the spelling or add a neighborhood
+              (e.g. &ldquo;Lucali Brooklyn&rdquo;).
+            </div>
+          )}
+          <div className="space-y-1">
+            {addResults.map((p) => {
+              const saved = inPipeline.has(p.id);
+              return (
+                <button
+                  key={p.id}
+                  className="card flex w-full items-center gap-2 p-2 text-left disabled:opacity-50"
+                  disabled={saved}
+                  onClick={() => addVerified(p)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{p.name}</div>
+                    <div className="truncate text-xs text-muted">
+                      {p.address}
+                      {p.distanceMeters != null ? ` · ${formatDistance(p.distanceMeters)}` : ""}
+                    </div>
+                    {p.cuisines.length > 0 && (
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {p.cuisines.slice(0, 3).map((c) => (
+                          <span key={c} className="tag">
+                            {labelForTag(c)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs font-semibold text-accent">
+                    {saved ? "✓ In pipeline" : "+ Add"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {loaded && deals.length === 0 ? (
         <div className="card p-8 text-center text-sm text-muted">
           Your pipeline is empty.{" "}
-          <Link href="/search" className="text-accent underline">
+          <Link href="/" className="text-accent underline">
             Search for places
           </Link>{" "}
           and add the ones you want to pitch — they&apos;ll show up here as cards you can
           move from <b>To Contact</b> all the way to <b>Accepted</b>.
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <div className="-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4">
           {STAGES.map((stage) => {
             const list = byStage.get(stage.id) ?? [];
             return (
               <div
                 key={stage.id}
-                className={`flex min-h-40 flex-col gap-2 rounded-xl border p-2 transition-colors ${
+                className={`flex w-[82vw] max-w-xs shrink-0 snap-center flex-col gap-2 rounded-xl border p-2 transition-colors sm:w-72 sm:snap-align-none ${
                   dragOver === stage.id
                     ? "border-accent bg-accent-soft/50"
                     : "border-border bg-card/50"
@@ -136,23 +218,28 @@ export default function PipelinePage() {
                   </div>
                   <div className="text-[11px] text-muted">{stage.hint}</div>
                 </div>
-                {list.map((deal) => (
-                  <DealCard
-                    key={deal.id}
-                    deal={deal}
-                    store={store}
-                    onDragStart={() => setDragId(deal.id)}
-                    onDragEnd={() => {
-                      setDragId(null);
-                      setDragOver(null);
-                    }}
-                  />
-                ))}
+                <div className="flex min-h-24 flex-col gap-2 overflow-y-auto">
+                  {list.map((deal) => (
+                    <DealCard
+                      key={deal.id}
+                      deal={deal}
+                      store={store}
+                      onDragStart={() => setDragId(deal.id)}
+                      onDragEnd={() => {
+                        setDragId(null);
+                        setDragOver(null);
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             );
           })}
         </div>
       )}
+      <div className="px-1 text-center text-[11px] text-muted">
+        Swipe sideways to move between stages · drag cards or use the → buttons
+      </div>
     </div>
   );
 }

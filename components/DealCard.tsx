@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { labelForTag } from "@/lib/cuisines";
 import { priceLabel } from "@/lib/geo";
-import { fillTemplate, useDeals, useSettings } from "@/lib/store";
+import { defaultPitch, fillTemplate, useDeals, usePitches } from "@/lib/store";
 import { Deal, STAGES, Stage } from "@/lib/types";
 
 interface Props {
@@ -19,7 +19,7 @@ function stageIndex(stage: Stage): number {
 
 export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const { updateDeal, removeDeal, addOfferedTime, removeOfferedTime } = store;
-  const { settings } = useSettings();
+  const { pitches } = usePitches();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [timeWhen, setTimeWhen] = useState("");
@@ -32,7 +32,8 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const next = idx < STAGES.length - 1 ? STAGES[idx + 1] : null;
 
   async function dm() {
-    const message = fillTemplate(settings.template, deal.name);
+    const pitch = defaultPitch(pitches);
+    const message = fillTemplate(pitch?.body ?? "", deal.name);
     try {
       await navigator.clipboard.writeText(message);
       setCopied(true);

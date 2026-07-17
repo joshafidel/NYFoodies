@@ -1,11 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { Nav } from "@/components/Nav";
+import { BottomNav } from "@/components/BottomNav";
 
 export const metadata: Metadata = {
-  title: "NYFoodies — Restaurant Outreach",
+  title: "NYFoodies",
   description:
     "Find restaurants & bars, DM them on Instagram, and track collab deals through your pipeline.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -15,12 +22,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
-        <Nav />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
-        <footer className="border-t border-border py-4 text-center text-xs text-muted">
-          NYFoodies · place data © OpenStreetMap contributors
-        </footer>
+      <body className="min-h-full">
+        <main className="mx-auto w-full max-w-6xl px-3 pb-24 pt-3 sm:px-4">{children}</main>
+        <BottomNav />
       </body>
     </html>
   );

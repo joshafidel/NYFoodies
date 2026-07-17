@@ -1,210 +1,518 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useDeals } from "@/lib/store";
-import { STAGES } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ALL_CUISINE_TAGS,
+  CUISINE_EMOJI,
+  DIETARY_LABELS,
+  MEAL_LABELS,
+  PRICE_CATEGORY_LABELS,
+  VENUE_LABELS,
+  emojiForPlace,
+  labelForTag,
+} from "@/lib/cuisines";
+import { formatDistance, priceLabel } from "@/lib/geo";
+import { useDeals, useSettings } from "@/lib/store";
+import { Place } from "@/lib/types";
 
-interface IgProfile {
-  username: string;
-  name?: string;
-  profile_picture_url?: string;
-  followers_count?: number;
-  media_count?: number;
+const MapView = dynamic(() => import("@/components/MapView"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-sm text-muted">
+      Loading map…
+    </div>
+  ),
+});
+
+type SortMode = "distance" | "price_desc" | "price_asc" | "name";
+
+interface GeoResult {
+  label: string;
+  lat: number;
+  lon: number;
 }
 
-interface IgMedia {
-  id: string;
-  caption?: string;
-  media_type: string;
-  media_url?: string;
-  thumbnail_url?: string;
-  permalink: string;
-  like_count?: number;
-  comments_count?: number;
-}
+const RADII = [
+  { m: 400, label: "0.25 mi" },
+  { m: 800, label: "0.5 mi" },
+  { m: 1600, label: "1 mi" },
+  { m: 3200, label: "2 mi" },
+  { m: 5000, label: "3 mi" },
+];
 
-interface IgState {
-  configured: boolean;
-  connected: boolean;
-  profile?: IgProfile;
-  media?: IgMedia[];
-  error?: string;
-}
+const VENUE_OPTIONS = ["food", "drinks", "food_and_drinks", "dessert", "cafe"];
+const MEAL_OPTIONS = ["breakfast", "lunch", "dinner"];
+const PRICE_OPTIONS = ["fast_food", "cheap", "moderate", "fine_dining"];
+const DIETARY_OPTIONS = ["healthy", "gluten_free", "vegan", "vegetarian"];
 
-export default function Dashboard() {
-  const { deals, loaded } = useDeals();
-  const [ig, setIg] = useState<IgState | null>(null);
+export default function SearchPage() {
+  const { deals, addDeal } = useDeals();
+  const { settings, update, loaded: settingsLoaded } = useSettings();
+
+  const [locationText, setLocationText] = useState("");
+  const [origin, setOrigin] = useState<GeoResult | null>(null);
+  const [geoResults, setGeoResults] = useState<GeoResult[]>([]);
+  const [radius, setRadius] = useState(1600);
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [view, setView] = useState<"list" | "map">("list");
+  const [sort, setSort] = useState<SortMode>("distance");
+  const [showFilters, setShowFilters] = useState(false);
+  const [cuisineOpen, setCuisineOpen] = useState(false);
+  const [addedFlash, setAddedFlash] = useState<string | null>(null);
+  const searchedOnce = useRef(false);
+
+  // filter state — OR within a category, AND across categories
+  const [meals, setMeals] = useState<Set<string>>(new Set());
+  const [prices, setPrices] = useState<Set<string>>(new Set());
+  const [cuisines, setCuisines] = useState<Set<string>>(new Set());
+  const [dietary, setDietary] = useState<Set<string>>(new Set());
+  const [venues, setVenues] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch("/api/instagram/me")
-      .then((r) => r.json())
-      .then(setIg)
-      .catch(() => setIg({ configured: false, connected: false }));
-  }, []);
+    if (settingsLoaded && settings.defaultLocation && !origin && !searchedOnce.current) {
+      setOrigin(settings.defaultLocation);
+      setLocationText(settings.defaultLocation.label.split(",")[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
 
-  const counts = Object.fromEntries(
-    STAGES.map((s) => [s.id, deals.filter((d) => d.stage === s.id).length])
+  const inPipeline = useMemo(
+    () => new Set(deals.map((d) => d.sourceId).filter(Boolean)),
+    [deals]
+  );
+
+  async function geocode() {
+    if (!locationText.trim()) return;
+    setError("");
+    setGeoResults([]);
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(locationText)}`);
+    const json = await res.json();
+    if (!json.results?.length) {
+      setError("Couldn't find that location — try adding a borough or zip.");
+      return;
+    }
+    if (json.results.length === 1) chooseOrigin(json.results[0]);
+    else setGeoResults(json.results);
+  }
+
+  function chooseOrigin(g: GeoResult) {
+    setGeoResults([]);
+    setOrigin(g);
+    update({ defaultLocation: g });
+    void runSearch(g, radius);
+  }
+
+  function useMyLocation() {
+    setError("");
+    if (!navigator.geolocation) {
+      setError("Your browser doesn't support geolocation — type a location instead.");
+      return;
+    }
+    setLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const g = { label: "My location", lat: pos.coords.latitude, lon: pos.coords.longitude };
+        setLocationText("My location");
+        setOrigin(g);
+        void runSearch(g, radius);
+      },
+      () => {
+        setLoading(false);
+        setError("Couldn't get your location — allow location access or type one.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  async function runSearch(g: GeoResult, r: number) {
+    searchedOnce.current = true;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/places?lat=${g.lat}&lon=${g.lon}&radius=${r}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Search failed");
+      setPlaces(json.places ?? []);
+      if (!json.places?.length) setError("No places found here — try a bigger radius.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Search failed — try again in a moment.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /** OR within a category, AND across categories. */
+  const matches = useCallback(
+    (p: Place): boolean => {
+      if (meals.size > 0 && !p.meals.some((m) => meals.has(m))) return false;
+      if (prices.size > 0 && !(p.priceCategory && prices.has(p.priceCategory))) return false;
+      if (cuisines.size > 0 && !p.cuisines.some((c) => cuisines.has(c))) return false;
+      if (dietary.size > 0) {
+        const ok = [...dietary].some(
+          (d) => p.dietary.includes(d) || p.dietary.includes(`${d}_options`)
+        );
+        if (!ok) return false;
+      }
+      if (venues.size > 0) {
+        const ok = [...venues].some((v) =>
+          v === "food_and_drinks"
+            ? p.venueTypes.includes("food") && p.venueTypes.includes("drinks")
+            : p.venueTypes.includes(v)
+        );
+        if (!ok) return false;
+      }
+      return true;
+    },
+    [meals, prices, cuisines, dietary, venues]
+  );
+
+  const filtered = useMemo(() => {
+    const out = places.filter(matches);
+    const byDistance = (a: Place, b: Place) =>
+      (a.distanceMeters ?? Infinity) - (b.distanceMeters ?? Infinity);
+    switch (sort) {
+      case "distance":
+        return [...out].sort(byDistance);
+      case "price_desc":
+        return [...out].sort(
+          (a, b) => (b.priceLevel ?? 0) - (a.priceLevel ?? 0) || byDistance(a, b)
+        );
+      case "price_asc":
+        return [...out].sort(
+          (a, b) => (a.priceLevel ?? 5) - (b.priceLevel ?? 5) || byDistance(a, b)
+        );
+      case "name":
+        return [...out].sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }, [places, matches, sort]);
+
+  const activeFilterCount =
+    meals.size + prices.size + cuisines.size + dietary.size + venues.size;
+
+  function toggle(set: Set<string>, setter: (s: Set<string>) => void, value: string) {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setter(next);
+  }
+
+  function clearFilters() {
+    setMeals(new Set());
+    setPrices(new Set());
+    setCuisines(new Set());
+    setDietary(new Set());
+    setVenues(new Set());
+  }
+
+  function addToPipeline(p: Place) {
+    addDeal({
+      name: p.name,
+      instagramHandle: p.instagramHandle,
+      address: p.address,
+      lat: p.lat,
+      lon: p.lon,
+      cuisines: p.cuisines,
+      priceLevel: p.priceLevel,
+      website: p.website,
+      phone: p.phone,
+      sourceId: p.id,
+    });
+    setAddedFlash(p.id);
+    setTimeout(() => setAddedFlash(null), 1500);
+  }
+
+  const emojiFor = useCallback(
+    (p: Place) => emojiForPlace(p, cuisines, dietary),
+    [cuisines, dietary]
+  );
+
+  function dietaryBadges(p: Place): string[] {
+    const out: string[] = [];
+    for (const key of DIETARY_OPTIONS) {
+      if (p.dietary.includes(key)) out.push(DIETARY_LABELS[key]);
+      else if (p.dietary.includes(`${key}_options`)) out.push(`${DIETARY_LABELS[key]} options`);
+    }
+    return out;
+  }
+
+  const chipRow = (
+    title: string,
+    options: string[],
+    labels: Record<string, string>,
+    selected: Set<string>,
+    setter: (s: Set<string>) => void
+  ) => (
+    <div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        {title}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => (
+          <button
+            key={o}
+            className={`chip ${selected.has(o) ? "chip-on" : ""}`}
+            onClick={() => toggle(selected, setter, o)}
+          >
+            {labels[o] ?? labelForTag(o)}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 
   return (
-    <div className="space-y-6">
-      <section className="card p-6">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome back 🍜</h1>
-        <p className="mt-1 text-sm text-muted">
-          Find restaurants &amp; bars, pitch them on Instagram, and track every collab
-          from first DM to booked visit.
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/search" className="btn btn-primary">
-            🔍 Find places
-          </Link>
-          <Link href="/pipeline" className="btn">
-            📋 Open pipeline
-          </Link>
+    <div className="space-y-3">
+      {/* Search bar */}
+      <div className="card space-y-2 p-3">
+        <div className="flex gap-2">
+          <input
+            className="min-w-0 flex-1"
+            value={locationText}
+            onChange={(e) => setLocationText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && geocode()}
+            placeholder="Neighborhood, address, or zip…"
+          />
+          <button className="btn btn-primary shrink-0" onClick={geocode} disabled={loading}>
+            {loading ? "…" : "Search"}
+          </button>
         </div>
-      </section>
-
-      {/* Pipeline snapshot */}
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
-          Pipeline snapshot
-        </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {STAGES.map((s) => (
-            <Link
-              key={s.id}
-              href="/pipeline"
-              className="card p-4 transition-transform hover:-translate-y-0.5"
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn text-xs" onClick={useMyLocation} disabled={loading}>
+            📍 My location
+          </button>
+          <select
+            className="text-xs"
+            value={radius}
+            onChange={(e) => {
+              const r = parseInt(e.target.value, 10);
+              setRadius(r);
+              if (origin) void runSearch(origin, r);
+            }}
+          >
+            {RADII.map((r) => (
+              <option key={r.m} value={r.m}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <button
+            className={`btn text-xs ${activeFilterCount > 0 ? "btn-primary" : ""}`}
+            onClick={() => setShowFilters((v) => !v)}
+          >
+            ⚙︎ Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
+          <div className="ml-auto flex overflow-hidden rounded-lg border border-border text-xs font-medium">
+            <button
+              className={`px-3 py-1.5 ${view === "list" ? "bg-accent text-white" : "text-muted"}`}
+              onClick={() => setView("list")}
             >
-              <div className="text-2xl font-bold">{loaded ? counts[s.id] : "–"}</div>
-              <div className="text-xs font-medium text-muted">{s.label}</div>
-            </Link>
-          ))}
+              ☰ List
+            </button>
+            <button
+              className={`px-3 py-1.5 ${view === "map" ? "bg-accent text-white" : "text-muted"}`}
+              onClick={() => setView("map")}
+            >
+              🗺️ Map
+            </button>
+          </div>
         </div>
-      </section>
 
-      {/* Instagram */}
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
-          Your Instagram
-        </h2>
-        {!ig ? (
-          <div className="card p-6 text-sm text-muted">Checking Instagram connection…</div>
-        ) : ig.connected && ig.profile ? (
-          <div className="card p-6">
-            <div className="flex items-center gap-4">
-              {ig.profile.profile_picture_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={ig.profile.profile_picture_url}
-                  alt={ig.profile.username}
-                  className="h-16 w-16 rounded-full border border-border object-cover"
-                />
-              )}
-              <div className="flex-1">
-                <div className="font-bold">@{ig.profile.username}</div>
-                {ig.profile.name && <div className="text-sm text-muted">{ig.profile.name}</div>}
-                <div className="mt-1 flex gap-4 text-sm">
-                  <span>
-                    <b>{ig.profile.followers_count?.toLocaleString() ?? "—"}</b>{" "}
-                    <span className="text-muted">followers</span>
-                  </span>
-                  <span>
-                    <b>{ig.profile.media_count?.toLocaleString() ?? "—"}</b>{" "}
-                    <span className="text-muted">posts</span>
-                  </span>
-                </div>
-              </div>
-              <form action="/api/instagram/logout" method="post">
-                <button className="btn btn-ghost text-xs text-muted">Disconnect</button>
-              </form>
-            </div>
-            {ig.media && ig.media.length > 0 && (
-              <div className="mt-5 grid grid-cols-3 gap-2 sm:grid-cols-6">
-                {ig.media.map((m) => (
-                  <a
-                    key={m.id}
-                    href={m.permalink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group relative block aspect-square overflow-hidden rounded-lg border border-border"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={m.media_type === "VIDEO" ? m.thumbnail_url ?? m.media_url : m.media_url}
-                      alt={m.caption?.slice(0, 60) ?? "post"}
-                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    />
-                    {(m.like_count != null || m.comments_count != null) && (
-                      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                        ❤️ {m.like_count ?? 0} 💬 {m.comments_count ?? 0}
-                      </span>
-                    )}
-                  </a>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : ig.configured ? (
-          <div className="card flex flex-col items-start gap-3 p-6">
-            <p className="text-sm text-muted">
-              Connect your Instagram professional account to pull your profile stats and
-              recent posts — handy proof when you pitch restaurants.
-              {ig.error && <span className="mt-1 block text-accent">{ig.error}</span>}
-            </p>
-            <a href="/api/instagram/login" className="btn btn-primary">
-              📸 Connect Instagram
-            </a>
-          </div>
-        ) : (
-          <div className="card p-6 text-sm">
-            <p className="font-medium">Instagram isn&apos;t configured yet (5-minute, free setup)</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted">
-              <li>
-                Make sure your Instagram account is a free <b>Professional</b> account
-                (Creator or Business) — switch in Instagram Settings.
-              </li>
-              <li>
-                Create a free app at{" "}
-                <a
-                  className="text-accent underline"
-                  href="https://developers.facebook.com/apps/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  developers.facebook.com
-                </a>{" "}
-                and add the <b>Instagram</b> product → &ldquo;API setup with Instagram login&rdquo;.
-              </li>
-              <li>
-                Add <code className="rounded bg-accent-soft px-1">YOUR_APP_URL/api/instagram/callback</code>{" "}
-                as a redirect URI.
-              </li>
-              <li>
-                Copy the Instagram App ID &amp; Secret into <code className="rounded bg-accent-soft px-1">.env.local</code>{" "}
-                (see <code className="rounded bg-accent-soft px-1">.env.example</code>) and restart the app.
-              </li>
-            </ol>
-            <p className="mt-2 text-muted">
-              Everything else in the app works without this — connecting Instagram just adds
-              your live profile &amp; posts here.
-            </p>
+        {geoResults.length > 0 && (
+          <div className="space-y-1 text-sm">
+            <div className="text-xs text-muted">Which one?</div>
+            {geoResults.map((g) => (
+              <button
+                key={`${g.lat},${g.lon}`}
+                className="btn block w-full text-left text-xs"
+                onClick={() => chooseOrigin(g)}
+              >
+                {g.label}
+              </button>
+            ))}
           </div>
         )}
-      </section>
+      </div>
 
-      {/* How DMs work */}
-      <section className="card p-6 text-sm">
-        <h2 className="font-semibold">How DMing works here</h2>
-        <p className="mt-1 text-muted">
-          Instagram doesn&apos;t allow apps to auto-send cold DMs (accounts get banned for it).
-          Instead, each place in your pipeline has a <b>DM button</b> that copies your pitch
-          template and opens their Instagram thread — you just paste and hit send. The
-          pipeline then tracks who you&apos;ve contacted, who replied, who accepted, and the
-          visit times they offered.
-        </p>
-      </section>
+      {/* Filters */}
+      {showFilters && (
+        <div className="card space-y-3 p-3">
+          {chipRow("Type", VENUE_OPTIONS, VENUE_LABELS, venues, setVenues)}
+          {chipRow("Meal", MEAL_OPTIONS, MEAL_LABELS, meals, setMeals)}
+          {chipRow("Price", PRICE_OPTIONS, PRICE_CATEGORY_LABELS, prices, setPrices)}
+          {chipRow("Dietary", DIETARY_OPTIONS, DIETARY_LABELS, dietary, setDietary)}
+
+          {/* Cuisine dropdown */}
+          <div>
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Cuisine
+            </div>
+            <div className="relative">
+              <button
+                className="btn w-full justify-between text-left text-xs"
+                onClick={() => setCuisineOpen((v) => !v)}
+              >
+                <span className="truncate">
+                  {cuisines.size === 0
+                    ? "Any cuisine"
+                    : [...cuisines].map((c) => labelForTag(c)).join(", ")}
+                </span>
+                <span className="text-muted">{cuisineOpen ? "▲" : "▼"}</span>
+              </button>
+              {cuisineOpen && (
+                <>
+                  <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
+                    {ALL_CUISINE_TAGS.map((c) => (
+                      <button
+                        key={c}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
+                          cuisines.has(c) ? "bg-accent-soft font-semibold text-accent" : ""
+                        }`}
+                        onClick={() => toggle(cuisines, setCuisines, c)}
+                      >
+                        <span>{CUISINE_EMOJI[c] ?? "🍽️"}</span>
+                        <span className="flex-1">{labelForTag(c)}</span>
+                        {cuisines.has(c) && <span>✓</span>}
+                      </button>
+                    ))}
+                    <button
+                      className="btn btn-primary mt-1 w-full justify-center text-xs"
+                      onClick={() => setCuisineOpen(false)}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-muted">
+            <span>Filters in different groups compound (AND); within a group, either matches (OR).</span>
+            {activeFilterCount > 0 && (
+              <button className="btn btn-ghost text-xs text-accent" onClick={clearFilters}>
+                Clear all
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && <div className="card border-accent p-3 text-sm text-accent">{error}</div>}
+
+      {/* Results header */}
+      {places.length > 0 && (
+        <div className="flex items-center gap-2 px-1 text-xs text-muted">
+          <span>
+            {filtered.length} of {places.length} places
+          </span>
+          {view === "list" && (
+            <select
+              className="ml-auto text-xs"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortMode)}
+            >
+              <option value="distance">Closest first</option>
+              <option value="price_desc">Price: high → low</option>
+              <option value="price_asc">Price: low → high</option>
+              <option value="name">Name A–Z</option>
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* Map view */}
+      {view === "map" && origin && (
+        <div className="h-[60vh] overflow-hidden rounded-xl border border-border">
+          <MapView
+            places={filtered}
+            origin={origin}
+            emojiFor={emojiFor}
+            inPipeline={inPipeline}
+            onAdd={addToPipeline}
+          />
+        </div>
+      )}
+      {view === "map" && !origin && (
+        <div className="card p-8 text-center text-sm text-muted">
+          Search a location first to see the map.
+        </div>
+      )}
+
+      {/* List view */}
+      {view === "list" && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((p) => {
+            const saved = inPipeline.has(p.id);
+            return (
+              <div key={p.id} className="card flex flex-col gap-1.5 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold leading-tight">{p.name}</div>
+                    <div className="text-xs text-muted">
+                      {formatDistance(p.distanceMeters)}
+                      {p.priceLevel ? ` · ${priceLabel(p.priceLevel)}` : ""}
+                      {p.priceCategory === "fast_food" ? " · Fast food" : ""}
+                      {p.address ? ` · ${p.address}` : ""}
+                    </div>
+                  </div>
+                  <span className="text-xl leading-none">{emojiFor(p)}</span>
+                </div>
+                {(p.cuisines.length > 0 || dietaryBadges(p).length > 0) && (
+                  <div className="flex flex-wrap gap-1">
+                    {p.cuisines.slice(0, 4).map((c) => (
+                      <span key={c} className="tag">
+                        {labelForTag(c)}
+                      </span>
+                    ))}
+                    {dietaryBadges(p).map((b) => (
+                      <span key={b} className="tag" style={{ background: "#dcfce7", color: "#15803d" }}>
+                        {b}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
+                  {saved ? (
+                    <Link href="/pipeline" className="btn text-xs">
+                      ✓ In pipeline
+                    </Link>
+                  ) : (
+                    <button className="btn btn-primary text-xs" onClick={() => addToPipeline(p)}>
+                      {addedFlash === p.id ? "Added!" : "+ Add to pipeline"}
+                    </button>
+                  )}
+                  {p.instagramHandle && (
+                    <a
+                      className="btn text-xs"
+                      href={`https://instagram.com/${p.instagramHandle}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      @{p.instagramHandle}
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!loading && !searchedOnce.current && (
+        <div className="card p-6 text-center text-sm text-muted">
+          Type a neighborhood, address, or zip — or use your current location — to find
+          restaurants, bars, cafes &amp; dessert spots. Filter by meal, price, cuisine, and
+          dietary needs, then add the good ones to your pipeline.
+          <div className="mt-2 text-[11px]">
+            Price &amp; dietary info comes from open map data and can be missing — you can
+            always fix it on a card in the pipeline.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

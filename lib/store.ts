@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_TEMPLATE, Deal, OfferedTime, Settings, Stage } from "./types";
+import { DEFAULT_TEMPLATE, Deal, OfferedTime, Pitch, Settings, Stage } from "./types";
 
 const DEALS_KEY = "nyfoodies.deals.v1";
 const SETTINGS_KEY = "nyfoodies.settings.v1";
+const PITCHES_KEY = "nyfoodies.pitches.v1";
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -148,6 +149,93 @@ export function useSettings() {
   }, []);
 
   return { settings, loaded, update };
+}
+
+/** Pitches store — notes-app style, one pitch is the DM-button default. */
+export function usePitches() {
+  const [pitches, setPitches] = useState<Pitch[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let stored = readJson<Pitch[]>(PITCHES_KEY, []);
+    if (stored.length === 0) {
+      // seed from the legacy single template (or the built-in default)
+      const legacy = readJson<Settings>(SETTINGS_KEY, { template: DEFAULT_TEMPLATE });
+      stored = [
+        {
+          id: uid(),
+          title: "My pitch",
+          body: legacy.template || DEFAULT_TEMPLATE,
+          isDefault: true,
+          updatedAt: Date.now(),
+        },
+      ];
+      writeJson(PITCHES_KEY, stored);
+    }
+    setPitches(stored);
+    setLoaded(true);
+    const onChange = () => setPitches(readJson<Pitch[]>(PITCHES_KEY, []));
+    window.addEventListener("nyfoodies:store", onChange);
+    window.addEventListener("storage", onChange);
+    return () => {
+      window.removeEventListener("nyfoodies:store", onChange);
+      window.removeEventListener("storage", onChange);
+    };
+  }, []);
+
+  const save = useCallback((next: Pitch[]) => {
+    setPitches(next);
+    writeJson(PITCHES_KEY, next);
+  }, []);
+
+  const addPitch = useCallback(() => {
+    const current = readJson<Pitch[]>(PITCHES_KEY, []);
+    const pitch: Pitch = {
+      id: uid(),
+      title: "New pitch",
+      body: "",
+      isDefault: current.length === 0,
+      updatedAt: Date.now(),
+    };
+    save([pitch, ...current]);
+    return pitch;
+  }, [save]);
+
+  const updatePitch = useCallback(
+    (id: string, patch: Partial<Pitch>) => {
+      const current = readJson<Pitch[]>(PITCHES_KEY, []);
+      save(
+        current.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p))
+      );
+    },
+    [save]
+  );
+
+  const removePitch = useCallback(
+    (id: string) => {
+      let next = readJson<Pitch[]>(PITCHES_KEY, []).filter((p) => p.id !== id);
+      if (next.length > 0 && !next.some((p) => p.isDefault)) {
+        next = next.map((p, i) => (i === 0 ? { ...p, isDefault: true } : p));
+      }
+      save(next);
+    },
+    [save]
+  );
+
+  const setDefault = useCallback(
+    (id: string) => {
+      const current = readJson<Pitch[]>(PITCHES_KEY, []);
+      save(current.map((p) => ({ ...p, isDefault: p.id === id })));
+    },
+    [save]
+  );
+
+  return { pitches, loaded, addPitch, updatePitch, removePitch, setDefault };
+}
+
+/** The pitch the DM button copies. */
+export function defaultPitch(pitches: Pitch[]): Pitch | undefined {
+  return pitches.find((p) => p.isDefault) ?? pitches[0];
 }
 
 /** Fill the pitch template for a given place name. */

@@ -3,7 +3,7 @@ import { igConfigured, redirectUri } from "@/lib/instagram";
 
 export async function GET(req: NextRequest) {
   if (!igConfigured()) {
-    return NextResponse.redirect(new URL("/?ig_error=not_configured", req.url));
+    return NextResponse.redirect(new URL("/settings?ig_error=not_configured", req.url));
   }
   const params = new URLSearchParams({
     client_id: process.env.INSTAGRAM_APP_ID!,

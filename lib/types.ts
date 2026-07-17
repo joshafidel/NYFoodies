@@ -51,12 +51,24 @@ export interface Place {
   lon: number;
   category: string; // restaurant | bar | cafe | ...
   cuisines: string[];
+  venueTypes: string[]; // food | drinks | cafe | dessert
+  meals: string[]; // breakfast | lunch | dinner
+  dietary: string[]; // vegan | vegan_options | vegetarian | gluten_free | healthy | ...
+  priceCategory?: string; // fast_food | cheap | moderate | fine_dining
   priceLevel?: number;
   address?: string;
   website?: string;
   phone?: string;
   instagramHandle?: string;
   distanceMeters?: number;
+}
+
+export interface Pitch {
+  id: string;
+  title: string;
+  body: string;
+  isDefault?: boolean;
+  updatedAt: number;
 }
 
 export interface Settings {

@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { categoryFromOsm, cuisinesFromOsm } from "@/lib/cuisines";
+import {
+  categoryFromOsm,
+  cuisinesFromOsm,
+  dietaryFromOsm,
+  mealsFromOsm,
+  priceCategoryFrom,
+  venueTypesFromOsm,
+} from "@/lib/cuisines";
 import { haversineMeters } from "@/lib/geo";
 import { Place } from "@/lib/types";
 
@@ -93,6 +100,7 @@ out center tags 400;
         if (seen.has(key)) continue; // node+way duplicates of the same venue
         seen.add(key);
 
+        const priceLevel = priceFromTags(tags);
         places.push({
           id,
           name,
@@ -100,13 +108,17 @@ out center tags 400;
           lon: plon,
           category: categoryFromOsm(tags),
           cuisines: cuisinesFromOsm(tags),
-          priceLevel: priceFromTags(tags),
+          venueTypes: venueTypesFromOsm(tags),
+          meals: mealsFromOsm(tags),
+          dietary: dietaryFromOsm(tags),
+          priceCategory: priceCategoryFrom(tags, priceLevel),
+          priceLevel,
           address: buildAddress(tags),
           website: tags["website"] ?? tags["contact:website"],
           phone: tags["phone"] ?? tags["contact:phone"],
           instagramHandle: instagramFromTags(tags),
           distanceMeters: Math.round(haversineMeters(lat, lon, plat, plon)),
-        });
+        } satisfies Place);
       }
 
       places.sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));

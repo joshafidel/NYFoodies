@@ -4,7 +4,7 @@ import { IG_COOKIE, igConfigured, redirectUri } from "@/lib/instagram";
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   if (!code || !igConfigured()) {
-    return NextResponse.redirect(new URL("/?ig_error=auth_failed", req.url));
+    return NextResponse.redirect(new URL("/settings?ig_error=auth_failed", req.url));
   }
 
   try {
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const tokenJson = await tokenRes.json();
     if (!tokenRes.ok || !tokenJson.access_token) {
       console.error("IG token exchange failed", tokenJson);
-      return NextResponse.redirect(new URL("/?ig_error=token_exchange", req.url));
+      return NextResponse.redirect(new URL("/settings?ig_error=token_exchange", req.url));
     }
 
     // 2. short-lived -> long-lived token (~60 days)
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     const token: string = llJson.access_token ?? tokenJson.access_token;
     const maxAge: number = llJson.expires_in ?? 3600;
 
-    const res = NextResponse.redirect(new URL("/?ig_connected=1", req.url));
+    const res = NextResponse.redirect(new URL("/settings?ig_connected=1", req.url));
     res.cookies.set(IG_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -46,6 +46,6 @@ export async function GET(req: NextRequest) {
     return res;
   } catch (err) {
     console.error("IG callback error", err);
-    return NextResponse.redirect(new URL("/?ig_error=auth_failed", req.url));
+    return NextResponse.redirect(new URL("/settings?ig_error=auth_failed", req.url));
   }
 }
