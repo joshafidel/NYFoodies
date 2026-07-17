@@ -14,6 +14,11 @@ export async function GET(req: NextRequest) {
       format: "jsonv2",
       limit: "5",
       addressdetails: "0",
+      // Bias results toward the NYC metro area (bounded=0 keeps it a
+      // preference, not a hard filter) — stops ambiguous names like
+      // "Astoria" resolving to same-named towns on other continents.
+      viewbox: "-74.30,40.45,-73.65,41.00",
+      bounded: "0",
     });
     const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
       headers: {

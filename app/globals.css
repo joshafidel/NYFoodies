@@ -1,24 +1,30 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fafaf7;
-  --foreground: #1c1917;
+  --background: #fdf6ee;
+  --foreground: #43302b;
   --card: #ffffff;
-  --border: #e7e5e4;
-  --muted: #78716c;
-  --accent: #e11d48;
-  --accent-soft: #ffe4e6;
+  --border: #f3e5d8;
+  --muted: #a18072;
+  --accent: #f4623a;
+  --accent-soft: #ffe9de;
+  --mint: #e5f5ea;
+  --mint-text: #2e7d4f;
+  --shadow: 0 2px 14px rgba(120, 80, 50, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #121212;
-    --foreground: #f5f5f4;
-    --card: #1c1c1e;
-    --border: #2e2e30;
-    --muted: #a8a29e;
-    --accent: #fb7185;
-    --accent-soft: #3b1219;
+    --background: #211b18;
+    --foreground: #f5ede8;
+    --card: #2d2521;
+    --border: #3e332c;
+    --muted: #b59e91;
+    --accent: #ff8b63;
+    --accent-soft: #47302a;
+    --mint: #24382c;
+    --mint-text: #7fd6a2;
+    --shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -35,14 +41,8 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  font-family: var(--font-nunito), ui-rounded, "SF Pro Rounded", ui-sans-serif,
+    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 button,
@@ -51,44 +51,64 @@ button,
   /* kill double-tap zoom & tap delay so rapid adjacent taps land correctly */
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow);
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  border-radius: 0.5rem;
-  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  padding: 0.45rem 0.95rem;
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 700;
   border: 1px solid var(--border);
   background: var(--card);
+  color: var(--foreground);
   cursor: pointer;
-  transition: opacity 0.15s, background 0.15s;
+  transition: transform 0.1s, opacity 0.15s, background 0.15s;
 }
 .btn:hover {
-  opacity: 0.85;
+  opacity: 0.9;
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
+  box-shadow: 0 3px 10px rgba(244, 98, 58, 0.3);
 }
 .btn-ghost {
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
   border-radius: 9999px;
-  padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border: 1px solid var(--border);
+  padding: 0.3rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
   cursor: pointer;
   user-select: none;
+  transition: transform 0.1s, background 0.15s, border-color 0.15s;
+}
+.chip:active {
+  transform: scale(0.95);
 }
 .chip-on {
   background: var(--accent);
@@ -99,29 +119,44 @@ button,
 .tag {
   display: inline-flex;
   border-radius: 9999px;
-  padding: 0.1rem 0.5rem;
+  padding: 0.15rem 0.6rem;
   font-size: 0.7rem;
-  font-weight: 500;
+  font-weight: 700;
   background: var(--accent-soft);
   color: var(--accent);
+}
+.tag-green {
+  background: var(--mint);
+  color: var(--mint-text);
 }
 
 input,
 select,
 textarea {
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 0.4rem 0.65rem;
-  font-size: 0.875rem;
+  border: 1.5px solid var(--border);
+  border-radius: 1rem;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.9rem;
   color: var(--foreground);
+  font-family: inherit;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
 }
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid var(--accent);
+  outline: 2.5px solid var(--accent);
   outline-offset: 0;
   border-color: transparent;
+}
+input[type="range"] {
+  border: none;
+  background: transparent;
+  padding: 0;
 }
 
 /* ── Map markers & popups ─────────────────────────────────────────────── */
@@ -129,13 +164,13 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  font-size: 19px;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
   background: var(--card);
-  border: 2px solid var(--accent);
+  border: 2.5px solid var(--accent);
   border-radius: 9999px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 3px 8px rgba(120, 80, 50, 0.3);
   cursor: pointer;
 }
 .map-origin {
@@ -147,14 +182,15 @@ textarea:focus {
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.3);
 }
 .map-popup {
-  min-width: 170px;
+  min-width: 175px;
   font-size: 13px;
+  font-family: var(--font-nunito), ui-rounded, system-ui, sans-serif;
 }
 .map-popup-name {
-  font-weight: 700;
+  font-weight: 800;
 }
 .map-popup-meta {
-  color: #6b7280;
+  color: #8a7265;
   font-size: 11px;
   margin-top: 2px;
 }
@@ -162,41 +198,45 @@ textarea:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 .map-popup-tags span {
   background: var(--accent-soft);
   color: var(--accent);
   border-radius: 9999px;
-  padding: 1px 7px;
+  padding: 2px 8px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .map-popup-link {
   display: block;
   margin-top: 6px;
   color: var(--accent);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: underline;
 }
 .map-popup-btn {
-  margin-top: 7px;
+  margin-top: 8px;
   width: 100%;
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: 8px;
-  padding: 5px 8px;
+  border-radius: 9999px;
+  padding: 7px 10px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+  font-family: inherit;
 }
 .map-popup-btn:disabled {
-  background: #9ca3af;
+  background: #b8a99f;
   cursor: default;
 }
 .leaflet-container {
-  border-radius: 0.75rem;
+  border-radius: 1.25rem;
   z-index: 0;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 16px;
 }

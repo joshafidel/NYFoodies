@@ -34,11 +34,12 @@ interface GeoResult {
   lon: number;
 }
 
-const MI = 1609.34;
+/** Fallback when no starting location is given — heart of NYC. */
+const DEFAULT_NYC: GeoResult = { label: "New York City", lat: 40.7431, lon: -73.9712 };
 
+/** Slider steps are 400m ≈ ¼ mile, so label in clean quarter-mile increments. */
 function radiusLabel(m: number): string {
-  const miles = m / MI;
-  return miles < 1 ? `${(miles).toFixed(2).replace(/0$/, "")} mi` : `${miles.toFixed(1)} mi`;
+  return `${Number((m / 1600).toFixed(2))} mi`;
 }
 
 const VENUE_OPTIONS = ["food", "drinks", "food_and_drinks", "dessert", "cafe"];
@@ -99,13 +100,18 @@ export default function SearchPage() {
   );
 
   async function geocode() {
-    if (!locationText.trim()) return;
+    // no location typed? no problem — search all of NYC
+    if (!locationText.trim()) {
+      setLocationText(DEFAULT_NYC.label);
+      chooseOrigin(DEFAULT_NYC);
+      return;
+    }
     setError("");
     setGeoResults([]);
     const res = await fetch(`/api/geocode?q=${encodeURIComponent(locationText)}`);
     const json = await res.json();
     if (!json.results?.length) {
-      setError("Couldn't find that location — try adding a borough or zip.");
+      setError("Couldn't find that spot — try adding a borough or zip, or leave it empty to search all of NYC.");
       return;
     }
     if (json.results.length === 1) chooseOrigin(json.results[0]);
@@ -128,16 +134,29 @@ export default function SearchPage() {
     setLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const g = { label: "My location", lat: pos.coords.latitude, lon: pos.coords.longitude };
+        const { latitude, longitude, accuracy } = pos.coords;
+        // (0,0) or wildly imprecise fixes are bogus (this is what made the
+        // app "think you're in Africa") — fall back to typing a location
+        if (
+          (Math.abs(latitude) < 0.5 && Math.abs(longitude) < 0.5) ||
+          (accuracy != null && accuracy > 25000)
+        ) {
+          setLoading(false);
+          setError(
+            "Your device gave a bad location fix — try again outdoors, or just type a neighborhood."
+          );
+          return;
+        }
+        const g = { label: "My location", lat: latitude, lon: longitude };
         setLocationText("My location");
         setOrigin(g);
         void runSearch(g, radius);
       },
       () => {
         setLoading(false);
-        setError("Couldn't get your location — allow location access or type one.");
+        setError("Couldn't get your location — you can just type a neighborhood instead.");
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   }
 
@@ -279,15 +298,24 @@ export default function SearchPage() {
 
   return (
     <div className="space-y-3">
+      <div className="px-2 pt-1">
+        <h1 className="text-xl font-extrabold tracking-tight">
+          What are we eating today? 🍜
+        </h1>
+        <p className="text-sm text-muted">
+          Find spots, slide into their DMs, book the collab.
+        </p>
+      </div>
+
       {/* Search bar */}
-      <div className="card space-y-2 p-3">
+      <div className="card space-y-2.5 p-3.5">
         <div className="flex gap-2">
           <input
             className="min-w-0 flex-1"
             value={locationText}
             onChange={(e) => setLocationText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && geocode()}
-            placeholder="Neighborhood, address, or zip…"
+            placeholder="Neighborhood or zip — or leave empty for all of NYC"
           />
           <button className="btn btn-primary shrink-0" onClick={geocode} disabled={loading}>
             {loading ? "…" : "Search"}
@@ -346,16 +374,24 @@ export default function SearchPage() {
 
         {geoResults.length > 0 && (
           <div className="space-y-1 text-sm">
-            <div className="text-xs text-muted">Which one?</div>
+            <div className="text-xs font-semibold text-muted">
+              Which one did you mean? 🤔
+            </div>
             {geoResults.map((g) => (
               <button
                 key={`${g.lat},${g.lon}`}
                 className="btn block w-full text-left text-xs"
                 onClick={() => chooseOrigin(g)}
               >
-                {g.label}
+                📍 {g.label}
               </button>
             ))}
+          </div>
+        )}
+
+        {origin && searchedOnce.current && (
+          <div className="text-[11px] font-semibold text-muted">
+            📍 Searching near {origin.label.split(",").slice(0, 2).join(",")}
           </div>
         )}
       </div>
@@ -473,7 +509,8 @@ export default function SearchPage() {
       )}
       {view === "map" && !origin && (
         <div className="card p-8 text-center text-sm text-muted">
-          Search a location first to see the map.
+          Hit <b>Search</b> to load the map — no location needed, we&apos;ll start with
+          all of NYC 🗽
         </div>
       )}
 
@@ -506,7 +543,7 @@ export default function SearchPage() {
                       </span>
                     ))}
                     {dietaryBadges(p).map((b) => (
-                      <span key={b} className="tag" style={{ background: "#dcfce7", color: "#15803d" }}>
+                      <span key={b} className="tag tag-green">
                         {b}
                       </span>
                     ))}
@@ -551,12 +588,13 @@ export default function SearchPage() {
 
       {!loading && !searchedOnce.current && (
         <div className="card p-6 text-center text-sm text-muted">
-          Type a neighborhood, address, or zip — or use your current location — to find
-          restaurants, bars, cafes &amp; dessert spots. Filter by meal, price, cuisine, and
-          dietary needs, then add the good ones to your pipeline.
+          <div className="mb-1 text-3xl">🍕🍣🌮🍸</div>
+          Tap <b>Search</b> to explore spots near you — type a neighborhood if you want,
+          or leave it empty and we&apos;ll cover all of NYC. Filter by meal, price,
+          cuisine &amp; dietary needs, then save the good ones to your pipeline.
           <div className="mt-2 text-[11px]">
-            Price &amp; dietary info comes from open map data and can be missing — you can
-            always fix it on a card in the pipeline.
+            Prices marked ~ are our best guess from the venue&apos;s vibe — you can fix
+            them anytime on a pipeline card.
           </div>
         </div>
       )}
