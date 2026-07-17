@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { labelForTag } from "@/lib/cuisines";
+import { PRICE_RANGE_BY_LEVEL, labelForTag } from "@/lib/cuisines";
 import { priceLabel } from "@/lib/geo";
 import { useDeals, useSettings } from "@/lib/store";
 import { OutreachModal } from "./OutreachModal";
@@ -33,6 +33,25 @@ function toDateInput(ms: number): string {
   ).padStart(2, "0")}`;
 }
 
+/** "Mo-Fr 11:00-22:00; Sa 12:00-23:00" → readable lines. */
+function prettyHours(raw: string): string[] {
+  return raw
+    .split(";")
+    .map((s) =>
+      s
+        .trim()
+        .replace(/\bMo\b/g, "Mon")
+        .replace(/\bTu\b/g, "Tue")
+        .replace(/\bWe\b/g, "Wed")
+        .replace(/\bTh\b/g, "Thu")
+        .replace(/\bFr\b/g, "Fri")
+        .replace(/\bSa\b/g, "Sat")
+        .replace(/\bSu\b/g, "Sun")
+    )
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
 export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const { updateDeal, removeDeal, addOfferedTime, removeOfferedTime } = store;
   const { settings } = useSettings();
@@ -40,8 +59,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const [showOutreach, setShowOutreach] = useState(false);
   const [timeWhen, setTimeWhen] = useState("");
   const [timeNote, setTimeNote] = useState("");
-  const [editingHandle, setEditingHandle] = useState(false);
-  const [handleDraft, setHandleDraft] = useState(deal.instagramHandle ?? "");
+  const [imgBroken, setImgBroken] = useState(false);
 
   const idx = stageIndex(deal.stage);
   const prev = idx > 0 ? STAGES[idx - 1] : null;
@@ -65,13 +83,6 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
     updateDeal(deal.id, { contactStatus: "not_contacted", pendingOutreach: undefined });
   }
 
-  function saveHandle() {
-    updateDeal(deal.id, {
-      instagramHandle: handleDraft.trim().replace(/^@/, "") || undefined,
-    });
-    setEditingHandle(false);
-  }
-
   function addTime() {
     if (!timeWhen.trim()) return;
     addOfferedTime(deal.id, timeWhen.trim(), timeNote.trim() || undefined);
@@ -82,24 +93,33 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const showTimes =
     deal.stage === "responded" || deal.stage === "accepted" || deal.offeredTimes.length > 0;
 
-  const statusBadge =
-    status !== "not_contacted" ? (
-      <span
-        className={`tag ${status === "waiting_instagram" ? "" : "tag-green"}`}
-        title="Outreach status"
-      >
-        {CONTACT_STATUS_LABELS[status]}
-      </span>
-    ) : null;
-
   return (
     <div
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className="card cursor-grab space-y-2 p-3 text-sm active:cursor-grabbing"
+      className="card relative cursor-grab space-y-2 overflow-hidden p-3 text-sm active:cursor-grabbing"
     >
-      <div className="flex items-start justify-between gap-1">
+      {/* one-tap remove */}
+      <button
+        className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/35 text-xs font-bold text-white"
+        title="Remove from pipeline"
+        onClick={() => removeDeal(deal.id)}
+      >
+        ✕
+      </button>
+
+      {deal.imageUrl && !imgBroken && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={deal.imageUrl}
+          alt={deal.name}
+          className="-mx-3 -mt-3 mb-1 h-28 w-[calc(100%+1.5rem)] max-w-none object-cover"
+          onError={() => setImgBroken(true)}
+        />
+      )}
+
+      <div className="flex items-start justify-between gap-1 pr-6">
         <button
           className="text-left font-bold leading-tight hover:text-accent"
           onClick={() => setOpen((v) => !v)}
@@ -107,21 +127,54 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
         >
           {deal.name}
         </button>
-        {deal.priceLevel ? (
-          <span className="text-xs font-bold text-muted">{priceLabel(deal.priceLevel)}</span>
-        ) : null}
       </div>
 
-      {(deal.cuisines.length > 0 || statusBadge) && (
-        <div className="flex flex-wrap items-center gap-1">
-          {statusBadge}
-          {deal.cuisines.slice(0, 3).map((c) => (
-            <span key={c} className="tag">
-              {labelForTag(c)}
-            </span>
-          ))}
+      <div className="flex flex-wrap items-center gap-1">
+        {deal.priceLevel ? (
+          <span className="tag" title="Estimated per-person spend">
+            {priceLabel(deal.priceLevel)} · {PRICE_RANGE_BY_LEVEL[deal.priceLevel] ?? ""}
+          </span>
+        ) : null}
+        {status !== "not_contacted" && (
+          <span className={`tag ${status === "waiting_instagram" ? "" : "tag-green"}`}>
+            {CONTACT_STATUS_LABELS[status]}
+          </span>
+        )}
+        {deal.cuisines.slice(0, 3).map((c) => (
+          <span key={c} className="tag">
+            {labelForTag(c)}
+          </span>
+        ))}
+      </div>
+
+      {deal.openingHours && (
+        <div className="text-[11px] leading-snug text-muted">
+          🕐 {prettyHours(deal.openingHours).join(" · ")}
         </div>
       )}
+
+      {/* Instagram & website — always available */}
+      <div className="flex flex-wrap gap-1">
+        {deal.instagramHandle ? (
+          <a
+            className="btn text-xs"
+            href={`https://instagram.com/${deal.instagramHandle}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Instagram ↗
+          </a>
+        ) : (
+          <button className="btn text-xs" onClick={() => setShowOutreach(true)}>
+            Find Instagram
+          </button>
+        )}
+        {deal.website && (
+          <a className="btn text-xs" href={deal.website} target="_blank" rel="noreferrer">
+            Website ↗
+          </a>
+        )}
+      </div>
 
       {/* Follow-up badge */}
       {deal.followUpAt != null && status !== "waiting_instagram" && (
@@ -130,7 +183,9 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
             followUpOverdue ? "bg-accent text-white" : "bg-accent-soft/60 text-muted"
           }`}
         >
-          {followUpOverdue ? "⏰ Follow up now!" : `📅 Follow up ${new Date(deal.followUpAt).toLocaleDateString()}`}
+          {followUpOverdue
+            ? "⏰ Follow up now!"
+            : `📅 Follow up ${new Date(deal.followUpAt).toLocaleDateString()}`}
         </div>
       )}
 
@@ -171,7 +226,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
       ) : (
         <div className="flex flex-wrap gap-1">
           <button className="btn btn-primary text-xs" onClick={() => setShowOutreach(true)}>
-            ✉️ Prepare DM
+            Message on Instagram ↗
           </button>
           {prev && (
             <button
@@ -196,54 +251,8 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
 
       {open && (
         <div className="space-y-2 border-t border-border pt-2">
-          {/* Instagram handle */}
-          {editingHandle || !deal.instagramHandle ? (
-            <div className="flex items-center gap-1">
-              <input
-                className="w-full text-xs"
-                value={handleDraft}
-                onChange={(e) => setHandleDraft(e.target.value)}
-                placeholder="@instagramhandle"
-                onKeyDown={(e) => e.key === "Enter" && saveHandle()}
-              />
-              <button className="btn text-xs" onClick={saveHandle}>
-                Save
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between text-xs">
-              <a
-                href={`https://instagram.com/${deal.instagramHandle}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent underline"
-              >
-                @{deal.instagramHandle}
-              </a>
-              <button
-                className="btn btn-ghost text-xs text-muted"
-                onClick={() => {
-                  setHandleDraft(deal.instagramHandle ?? "");
-                  setEditingHandle(true);
-                }}
-              >
-                Edit
-              </button>
-            </div>
-          )}
-
           {deal.email && <div className="text-xs text-muted">📧 {deal.email}</div>}
           {deal.address && <div className="text-xs text-muted">📍 {deal.address}</div>}
-          {deal.website && (
-            <a
-              className="block text-xs text-accent underline"
-              href={deal.website}
-              target="_blank"
-              rel="noreferrer"
-            >
-              🌐 Website
-            </a>
-          )}
 
           {/* Follow-up date */}
           <label className="flex items-center gap-2 text-xs text-muted">
@@ -282,11 +291,26 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
               }
             >
               <option value="">unknown</option>
-              <option value="1">$</option>
-              <option value="2">$$</option>
-              <option value="3">$$$</option>
-              <option value="4">$$$$</option>
+              <option value="1">$ · 20–40pp</option>
+              <option value="2">$$ · 40–70pp</option>
+              <option value="3">$$$ · 70–100pp</option>
+              <option value="4">$$$$ · 100+pp</option>
             </select>
+          </label>
+
+          {/* Instagram handle editor */}
+          <label className="flex items-center gap-2 text-xs text-muted">
+            IG handle
+            <input
+              className="min-w-0 flex-1 text-xs"
+              defaultValue={deal.instagramHandle ?? ""}
+              placeholder="@handle"
+              onBlur={(e) =>
+                updateDeal(deal.id, {
+                  instagramHandle: e.target.value.trim().replace(/^@/, "") || undefined,
+                })
+              }
+            />
           </label>
 
           {/* Offered times editor */}
@@ -323,20 +347,10 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
             onBlur={(e) => updateDeal(deal.id, { notes: e.target.value })}
           />
 
-          <div className="flex justify-between text-[11px] text-muted">
-            <span>
-              {deal.contactedAt
-                ? `Contacted ${new Date(deal.contactedAt).toLocaleDateString()}`
-                : `Added ${new Date(deal.createdAt).toLocaleDateString()}`}
-            </span>
-            <button
-              className="text-muted hover:text-accent"
-              onClick={() => {
-                if (confirm(`Remove ${deal.name} from your pipeline?`)) removeDeal(deal.id);
-              }}
-            >
-              Delete
-            </button>
+          <div className="text-[11px] text-muted">
+            {deal.contactedAt
+              ? `Contacted ${new Date(deal.contactedAt).toLocaleDateString()}`
+              : `Added ${new Date(deal.createdAt).toLocaleDateString()}`}
           </div>
         </div>
       )}

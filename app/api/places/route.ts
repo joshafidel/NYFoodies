@@ -120,6 +120,7 @@ out center tags 400;
           website: tags["website"] ?? tags["contact:website"],
           phone: tags["phone"] ?? tags["contact:phone"],
           instagramHandle: instagramFromTags(tags),
+          openingHours: tags["opening_hours"],
           distanceMeters: Math.round(haversineMeters(lat, lon, plat, plon)),
         } satisfies Place);
       }

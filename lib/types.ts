@@ -72,6 +72,9 @@ export interface Deal {
   sourceId?: string;
   /** contact email when DMs aren't an option */
   email?: string;
+  openingHours?: string;
+  /** photo discovered from the place's own website (og:image) */
+  imageUrl?: string;
   contactStatus?: ContactStatus;
   /** when to nudge them again (ms epoch) */
   followUpAt?: number;
@@ -97,6 +100,7 @@ export interface Place {
   website?: string;
   phone?: string;
   instagramHandle?: string;
+  openingHours?: string;
   distanceMeters?: number;
 }
 
@@ -119,9 +123,18 @@ export interface CreatorProfile {
   followUpDays?: number;
 }
 
+export interface SavedPlace {
+  label: string;
+  lat: number;
+  lon: number;
+}
+
 export interface Settings {
   template: string;
-  defaultLocation?: { label: string; lat: number; lon: number };
+  defaultLocation?: SavedPlace;
+  /** Google-Maps-style saved locations */
+  home?: SavedPlace;
+  work?: SavedPlace;
   profile?: CreatorProfile;
 }
 

@@ -217,7 +217,7 @@ export function dietaryFromOsm(tags: Record<string, string>): string[] {
   return [...out];
 }
 
-/** Price bucket: fast_food | cheap | moderate | fine_dining. */
+/** Price bucket: fast_food | cheap | moderate | fine_dining | luxury. */
 export function priceCategoryFrom(
   tags: Record<string, string>,
   priceLevel?: number
@@ -226,7 +226,8 @@ export function priceCategoryFrom(
   if (priceLevel == null) return undefined;
   if (priceLevel <= 1) return "cheap";
   if (priceLevel === 2) return "moderate";
-  return "fine_dining";
+  if (priceLevel === 3) return "fine_dining";
+  return "luxury";
 }
 
 // ── Price estimation ──────────────────────────────────────────────────────
@@ -246,19 +247,27 @@ const CHEAP_CUISINES = new Set([
 const CHEAP_GROUPS = new Set(["dessert", "coffee", "bagels", "bakery", "deli", "breakfast"]);
 
 const FINE_CUISINES = new Set([
-  "steak_house", "steak", "sushi", "omakase", "kaiseki", "french", "oyster",
-  "raw_bar", "fine_dining", "tasting_menu",
+  "sushi", "french", "oyster", "raw_bar", "fine_dining", "steak",
 ]);
 
 const FINE_NAME_WORDS =
-  /\b(steakhouse|steak house|chophouse|omakase|kaiseki|prime|oyster|le |la grenouille|chez |maison|atelier|tasting|michelin|supper club)\b/i;
+  /\b(prime|oyster|le |chez |maison|atelier|bistro|supper club|trattoria)\b/i;
+
+// $100+ per-person signals
+const LUXURY_CUISINES = new Set([
+  "steak_house", "omakase", "kaiseki", "tasting_menu",
+]);
+
+const LUXURY_NAME_WORDS =
+  /\b(steakhouse|steak house|chophouse|omakase|kaiseki|tasting|michelin|caviar|la grenouille)\b/i;
 
 const CHEAP_NAME_WORDS =
   /\b(pizza|pizzeria|bagel|deli|taco|taqueria|halal|shack|cart|express|to go|takeout|donut|doughnut|dumpling|noodle|chicken|burger|sub|sandwich|bodega|luncheonette)\b/i;
 
 /**
  * Estimate {category, level} when real price data is missing.
- * level: 1 cheap · 2 moderate · 3 fine dining.
+ * level: 1 = $ ($20–40pp) · 2 = $$ (40–70) · 3 = $$$ (70–100) · 4 = $$$$ (100+).
+ * Fast food (~$10–20) is its own bucket at level 1.
  */
 export function estimatePrice(
   tags: Record<string, string>,
@@ -274,6 +283,9 @@ export function estimatePrice(
     .filter(Boolean);
   const groups = cuisinesFromOsm(tags);
 
+  if (rawCuisines.some((c) => LUXURY_CUISINES.has(c)) || LUXURY_NAME_WORDS.test(name)) {
+    return { category: "luxury", level: 4 };
+  }
   if (rawCuisines.some((c) => FINE_CUISINES.has(c)) || FINE_NAME_WORDS.test(name)) {
     return { category: "fine_dining", level: 3 };
   }
@@ -290,11 +302,20 @@ export function estimatePrice(
   return { category: "moderate", level: 2 };
 }
 
+/** Per-person dollar ranges shown throughout the app. */
 export const PRICE_CATEGORY_LABELS: Record<string, string> = {
-  fast_food: "Fast food",
-  cheap: "Cheap ($)",
-  moderate: "Moderate ($$)",
-  fine_dining: "Fine dining ($$$+)",
+  fast_food: "Fast food · $10–20",
+  cheap: "$ · 20–40",
+  moderate: "$$ · 40–70",
+  fine_dining: "$$$ · 70–100",
+  luxury: "$$$$ · 100+",
+};
+
+export const PRICE_RANGE_BY_LEVEL: Record<number, string> = {
+  1: "$20–40pp",
+  2: "$40–70pp",
+  3: "$70–100pp",
+  4: "$100+pp",
 };
 
 export const DIETARY_LABELS: Record<string, string> = {

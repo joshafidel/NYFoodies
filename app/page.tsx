@@ -44,11 +44,11 @@ function radiusLabel(m: number): string {
 
 const VENUE_OPTIONS = ["food", "drinks", "food_and_drinks", "dessert", "cafe"];
 const MEAL_OPTIONS = ["breakfast", "lunch", "dinner"];
-const PRICE_OPTIONS = ["fast_food", "cheap", "moderate", "fine_dining"];
+const PRICE_OPTIONS = ["fast_food", "cheap", "moderate", "fine_dining", "luxury"];
 const DIETARY_OPTIONS = ["healthy", "gluten_free", "vegan", "vegetarian"];
 
 export default function SearchPage() {
-  const { deals, addDeal } = useDeals();
+  const { deals, addDeal, updateDeal } = useDeals();
   const { settings, update, loaded: settingsLoaded } = useSettings();
 
   const [locationText, setLocationText] = useState("");
@@ -61,23 +61,22 @@ export default function SearchPage() {
   const [view, setView] = useState<"list" | "map">("list");
   const [sort, setSort] = useState<SortMode>("distance");
   const [showFilters, setShowFilters] = useState(true);
-  const [cuisineOpen, setCuisineOpen] = useState(false);
   const [cuisineQuery, setCuisineQuery] = useState("");
   const [addedFlash, setAddedFlash] = useState<string | null>(null);
+  const [settingSlot, setSettingSlot] = useState<"home" | "work" | null>(null);
+  const [slotText, setSlotText] = useState("");
+  const [closedSections, setClosedSections] = useState<Set<string>>(new Set());
   const searchedOnce = useRef(false);
-  const cuisineBoxRef = useRef<HTMLDivElement>(null);
   const radiusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // close the cuisine dropdown when tapping anywhere outside it
-  useEffect(() => {
-    function onPointerDown(e: PointerEvent) {
-      if (cuisineBoxRef.current && !cuisineBoxRef.current.contains(e.target as Node)) {
-        setCuisineOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, []);
+  function toggleSection(id: string) {
+    setClosedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // filter state — OR within a category, AND across categories
   const [meals, setMeals] = useState<Set<string>>(new Set());
@@ -132,32 +131,66 @@ export default function SearchPage() {
       return;
     }
     setLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        // (0,0) or wildly imprecise fixes are bogus (this is what made the
-        // app "think you're in Africa") — fall back to typing a location
-        if (
-          (Math.abs(latitude) < 0.5 && Math.abs(longitude) < 0.5) ||
-          (accuracy != null && accuracy > 25000)
-        ) {
-          setLoading(false);
-          setError(
-            "Your device gave a bad location fix — try again outdoors, or just type a neighborhood."
-          );
-          return;
-        }
-        const g = { label: "My location", lat: latitude, lon: longitude };
-        setLocationText("My location");
-        setOrigin(g);
-        void runSearch(g, radius);
-      },
-      () => {
+
+    // Google-Maps-style accuracy: watch the GPS for up to 6s and keep the
+    // best fix instead of trusting the first (often cell-tower) guess.
+    let best: GeolocationPosition | null = null;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      navigator.geolocation.clearWatch(watchId);
+      if (!best) {
         setLoading(false);
         setError("Couldn't get your location — you can just type a neighborhood instead.");
+        return;
+      }
+      const { latitude, longitude, accuracy } = best.coords;
+      // (0,0) "null island" or hopeless accuracy = bogus fix
+      if (
+        (Math.abs(latitude) < 0.5 && Math.abs(longitude) < 0.5) ||
+        (accuracy != null && accuracy > 25000)
+      ) {
+        setLoading(false);
+        setError("Your device gave a bad location fix — try again outdoors, or type a neighborhood.");
+        return;
+      }
+      const g = { label: "My location", lat: latitude, lon: longitude };
+      setLocationText("My location");
+      setOrigin(g);
+      void runSearch(g, radius);
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        // good enough — stop early
+        if (pos.coords.accuracy <= 50) finish();
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      () => finish(),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
+    setTimeout(finish, 6000);
+  }
+
+  function saveSlot(slot: "home" | "work", g: GeoResult) {
+    update({ [slot]: g });
+    setSettingSlot(null);
+    setSlotText("");
+    chooseOrigin(g);
+  }
+
+  async function geocodeSlot(slot: "home" | "work") {
+    if (!slotText.trim()) return;
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(slotText)}`);
+    const json = await res.json();
+    if (!json.results?.length) {
+      setError("Couldn't find that address — try adding a zip.");
+      return;
+    }
+    const g = json.results[0] as GeoResult;
+    saveSlot(slot, { ...g, label: `${slot === "home" ? "Home" : "Work"} · ${g.label.split(",")[0]}` });
   }
 
   async function runSearch(g: GeoResult, r: number) {
@@ -241,7 +274,7 @@ export default function SearchPage() {
   }
 
   function addToPipeline(p: Place) {
-    addDeal({
+    const created = addDeal({
       name: p.name,
       instagramHandle: p.instagramHandle,
       address: p.address,
@@ -251,8 +284,21 @@ export default function SearchPage() {
       priceLevel: p.priceLevel,
       website: p.website,
       phone: p.phone,
+      openingHours: p.openingHours,
       sourceId: p.id,
     });
+    // Auto-discover their Instagram + a photo from their own website
+    if (p.website) {
+      fetch(`/api/enrich?url=${encodeURIComponent(p.website)}`)
+        .then((r) => r.json())
+        .then((j: { instagramHandle?: string | null; imageUrl?: string | null }) => {
+          const patch: { instagramHandle?: string; imageUrl?: string } = {};
+          if (!p.instagramHandle && j.instagramHandle) patch.instagramHandle = j.instagramHandle;
+          if (j.imageUrl) patch.imageUrl = j.imageUrl;
+          if (Object.keys(patch).length > 0) updateDeal(created.id, patch);
+        })
+        .catch(() => {});
+    }
     setAddedFlash(p.id);
     setTimeout(() => setAddedFlash(null), 1500);
   }
@@ -271,30 +317,48 @@ export default function SearchPage() {
     return out;
   }
 
-  const chipRow = (
-    title: string,
+  const chips = (
     options: string[],
     labels: Record<string, string>,
     selected: Set<string>,
     setter: (s: Set<string>) => void
   ) => (
-    <div>
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
-        {title}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((o) => (
-          <button
-            key={o}
-            className={`chip ${selected.has(o) ? "chip-on" : ""}`}
-            onClick={() => toggle(selected, setter, o)}
-          >
-            {labels[o] ?? labelForTag(o)}
-          </button>
-        ))}
-      </div>
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => (
+        <button
+          key={o}
+          className={`chip ${selected.has(o) ? "chip-on" : ""}`}
+          onClick={() => toggle(selected, setter, o)}
+        >
+          {labels[o] ?? labelForTag(o)}
+        </button>
+      ))}
     </div>
   );
+
+  /** Collapsible filter category — open by default, closable per category. */
+  const section = (title: string, id: string, body: React.ReactNode, count: number) => {
+    const closed = closedSections.has(id);
+    return (
+      <div className="rounded-2xl border border-border p-2.5">
+        <button
+          className="flex w-full items-center justify-between text-left"
+          onClick={() => toggleSection(id)}
+        >
+          <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">
+            {title}
+            {count > 0 && (
+              <span className="ml-1.5 rounded-full bg-accent px-1.5 text-[10px] text-white">
+                {count}
+              </span>
+            )}
+          </span>
+          <span className="text-xs text-muted">{closed ? "▸" : "▾"}</span>
+        </button>
+        {!closed && <div className="mt-2">{body}</div>}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -325,6 +389,36 @@ export default function SearchPage() {
           <button className="btn text-xs" onClick={useMyLocation} disabled={loading} title="Optional — you can just type a location instead">
             📍 My location
           </button>
+          {(["home", "work"] as const).map((slot) => {
+            const saved = settings[slot];
+            return (
+              <span key={slot} className="inline-flex items-center gap-0.5">
+                <button
+                  className={`btn text-xs ${settingSlot === slot ? "btn-primary" : ""}`}
+                  onClick={() => {
+                    if (saved) {
+                      setLocationText(saved.label.split("·").pop()?.trim() ?? saved.label);
+                      chooseOrigin(saved);
+                    } else {
+                      setSettingSlot(settingSlot === slot ? null : slot);
+                    }
+                  }}
+                  title={saved ? `Search near ${saved.label}` : `Save your ${slot} address`}
+                >
+                  {slot === "home" ? "⌂" : "⚒"} {saved ? (slot === "home" ? "Home" : "Work") : `+ ${slot === "home" ? "Home" : "Work"}`}
+                </button>
+                {saved && (
+                  <button
+                    className="btn btn-ghost px-1 text-[10px] text-muted"
+                    title={`Change ${slot} address`}
+                    onClick={() => setSettingSlot(settingSlot === slot ? null : slot)}
+                  >
+                    ✎
+                  </button>
+                )}
+              </span>
+            );
+          })}
           <button
             className={`btn text-xs ${activeFilterCount > 0 ? "btn-primary" : ""}`}
             onClick={() => setShowFilters((v) => !v)}
@@ -372,6 +466,22 @@ export default function SearchPage() {
           <span className="w-14 text-right text-xs font-semibold">{radiusLabel(radius)}</span>
         </div>
 
+        {settingSlot && (
+          <div className="flex gap-1.5">
+            <input
+              className="min-w-0 flex-1 text-sm"
+              value={slotText}
+              onChange={(e) => setSlotText(e.target.value)}
+              placeholder={`Your ${settingSlot} address (e.g. 123 Main St, Astoria)`}
+              onKeyDown={(e) => e.key === "Enter" && geocodeSlot(settingSlot)}
+              autoFocus
+            />
+            <button className="btn btn-primary shrink-0 text-xs" onClick={() => geocodeSlot(settingSlot)}>
+              Save {settingSlot}
+            </button>
+          </div>
+        )}
+
         {geoResults.length > 0 && (
           <div className="space-y-1 text-sm">
             <div className="text-xs font-semibold text-muted">
@@ -398,76 +508,64 @@ export default function SearchPage() {
 
       {/* Filters */}
       {showFilters && (
-        <div className="card space-y-3 p-3">
-          {chipRow("Type", VENUE_OPTIONS, VENUE_LABELS, venues, setVenues)}
-          {chipRow("Meal", MEAL_OPTIONS, MEAL_LABELS, meals, setMeals)}
-          {chipRow("Price", PRICE_OPTIONS, PRICE_CATEGORY_LABELS, prices, setPrices)}
-          {chipRow("Dietary", DIETARY_OPTIONS, DIETARY_LABELS, dietary, setDietary)}
-
-          {/* Cuisine combobox — type to filter, tap outside to close */}
-          <div ref={cuisineBoxRef}>
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Cuisine
-            </div>
-            {cuisines.size > 0 && (
-              <div className="mb-1.5 flex flex-wrap gap-1.5">
-                {[...cuisines].map((c) => (
-                  <button
-                    key={c}
-                    className="chip chip-on"
-                    onClick={() => toggle(cuisines, setCuisines, c)}
-                    title="Remove"
-                  >
-                    {CUISINE_EMOJI[c] ?? "🍽️"} {labelForTag(c)} ✕
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="relative">
-              <input
-                className="w-full text-sm"
-                value={cuisineQuery}
-                placeholder="Search cuisines… (Greek, Italian, Sushi…)"
-                onFocus={() => setCuisineOpen(true)}
-                onChange={(e) => {
-                  setCuisineQuery(e.target.value);
-                  setCuisineOpen(true);
-                }}
-              />
-              {cuisineOpen && (
-                <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
-                  {ALL_CUISINE_TAGS.filter((c) =>
-                    labelForTag(c).toLowerCase().includes(cuisineQuery.trim().toLowerCase())
-                  ).map((c) => (
-                    <button
-                      key={c}
-                      className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm ${
-                        cuisines.has(c) ? "bg-accent-soft font-semibold text-accent" : ""
-                      }`}
-                      onClick={() => toggle(cuisines, setCuisines, c)}
-                    >
-                      <span>{CUISINE_EMOJI[c] ?? "🍽️"}</span>
-                      <span className="flex-1">{labelForTag(c)}</span>
-                      {cuisines.has(c) && <span>✓</span>}
-                    </button>
-                  ))}
-                  {ALL_CUISINE_TAGS.filter((c) =>
-                    labelForTag(c).toLowerCase().includes(cuisineQuery.trim().toLowerCase())
-                  ).length === 0 && (
-                    <div className="px-2 py-2 text-xs text-muted">No cuisines match.</div>
-                  )}
-                </div>
+        <div className="card space-y-2 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-extrabold">Filters</span>
+            <div className="flex items-center gap-1">
+              {activeFilterCount > 0 && (
+                <button className="btn btn-ghost text-xs text-accent" onClick={clearFilters}>
+                  Clear all
+                </button>
               )}
+              <button className="btn text-xs" onClick={() => setShowFilters(false)}>
+                ✕ Hide
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-xs text-muted">
-            <span>Filters in different groups compound (AND); within a group, either matches (OR).</span>
-            {activeFilterCount > 0 && (
-              <button className="btn btn-ghost text-xs text-accent" onClick={clearFilters}>
-                Clear all
-              </button>
-            )}
+          {section("Type", "type", chips(VENUE_OPTIONS, VENUE_LABELS, venues, setVenues), venues.size)}
+          {section("Meal", "meal", chips(MEAL_OPTIONS, MEAL_LABELS, meals, setMeals), meals.size)}
+          {section(
+            "Price (per person)",
+            "price",
+            chips(PRICE_OPTIONS, PRICE_CATEGORY_LABELS, prices, setPrices),
+            prices.size
+          )}
+          {section("Dietary", "dietary", chips(DIETARY_OPTIONS, DIETARY_LABELS, dietary, setDietary), dietary.size)}
+          {section(
+            "Cuisine",
+            "cuisine",
+            <div className="space-y-1.5">
+              <input
+                className="w-full text-sm"
+                value={cuisineQuery}
+                onChange={(e) => setCuisineQuery(e.target.value)}
+                placeholder="Search cuisines… (Greek, Italian, Sushi…)"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {ALL_CUISINE_TAGS.filter((c) =>
+                  labelForTag(c).toLowerCase().includes(cuisineQuery.trim().toLowerCase())
+                ).map((c) => (
+                  <button
+                    key={c}
+                    className={`chip ${cuisines.has(c) ? "chip-on" : ""}`}
+                    onClick={() => toggle(cuisines, setCuisines, c)}
+                  >
+                    {CUISINE_EMOJI[c] ?? "🍽️"} {labelForTag(c)}
+                  </button>
+                ))}
+                {ALL_CUISINE_TAGS.filter((c) =>
+                  labelForTag(c).toLowerCase().includes(cuisineQuery.trim().toLowerCase())
+                ).length === 0 && (
+                  <div className="px-1 py-1 text-xs text-muted">No cuisines match.</div>
+                )}
+              </div>
+            </div>,
+            cuisines.size
+          )}
+
+          <div className="pt-1 text-[11px] text-muted">
+            Filters in different groups compound (AND); within a group, either matches (OR).
           </div>
         </div>
       )}
