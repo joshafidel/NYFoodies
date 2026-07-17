@@ -12,10 +12,14 @@ through a HubSpot-style pipeline — from first message to booked visit.
 - **Filter & sort** — filter by cuisine (Greek, Italian, drinks, healthy,
   dessert, … places can carry multiple tags), sort by distance or by price
   (high → low or low → high).
-- **DM in one tap** — every place has a DM button that copies your pitch
-  (managed in the Pitches tab) and opens their Instagram page. You
-  paste + send. *(Instagram bans apps that auto-send cold DMs, so this
-  copy-and-open flow is the safe, ToS-friendly way.)*
+- **Honest outreach flow** — "Prepare DM" lets you pick a pitch, preview and
+  edit the personalized message, then copy it and open the restaurant's
+  Instagram. Nothing is marked Contacted until *you* confirm you sent it,
+  and a follow-up reminder is scheduled automatically. Places without a
+  handle offer Instagram search, paste-a-URL, or email outreach instead.
+  *(Instagram bans apps that auto-send cold DMs, so this copy-and-open flow
+  is the safe, ToS-friendly way. Optional webhook-based DM detection is
+  scaffolded — see `docs/instagram-meta-setup.md`.)*
 - **Pipeline** — a drag-and-drop board: **To Contact → Contacted → Responded →
   Accepted** (plus Declined). Cards track notes, price level, Instagram
   handle, and the **visit times each place offered** once they respond.
@@ -78,5 +82,7 @@ reconnect when it expires.
 
 ## Stack
 
-Next.js (App Router) · TypeScript · Tailwind CSS · localStorage — no database,
-no paid services.
+Next.js (App Router) · TypeScript · Tailwind CSS · localStorage by default —
+no database or paid services required. An optional Prisma/Postgres layer and
+Meta webhook endpoint are included for official Instagram DM sync (see
+`docs/instagram-meta-setup.md`).

@@ -6,7 +6,7 @@ import { DealCard } from "@/components/DealCard";
 import { formatDistance } from "@/lib/geo";
 import { labelForTag } from "@/lib/cuisines";
 import { useDeals, useSettings } from "@/lib/store";
-import { Deal, Place, STAGES, Stage } from "@/lib/types";
+import { ACTIVE_STAGES, Deal, Place, STAGES, Stage } from "@/lib/types";
 
 export default function PipelinePage() {
   const store = useDeals();
@@ -15,6 +15,7 @@ export default function PipelinePage() {
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<Stage | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
 
   // verified-only manual add (typeahead against real places)
   const [showAdd, setShowAdd] = useState(false);
@@ -76,6 +77,20 @@ export default function PipelinePage() {
     return map;
   }, [filtered]);
 
+  const archivedCount = byStage.get("declined")?.length ?? 0;
+  const visibleStages = showArchive
+    ? STAGES.filter((s) => s.id === "declined")
+    : ACTIVE_STAGES;
+
+  const followUpsDue = useMemo(
+    () =>
+      deals.filter(
+        (d) =>
+          d.followUpAt != null && d.followUpAt <= Date.now() && d.stage !== "declined"
+      ),
+    [deals]
+  );
+
   function onDrop(stage: Stage) {
     if (dragId) updateDeal(dragId, { stage });
     setDragId(null);
@@ -106,17 +121,36 @@ export default function PipelinePage() {
         <span className="text-xs text-muted">
           {loaded ? `${deals.length} place${deals.length === 1 ? "" : "s"}` : ""}
         </span>
-        <button
-          className="btn ml-auto text-xs"
-          onClick={() => {
-            setShowAdd((v) => !v);
-            setAddQuery("");
-            setAddResults([]);
-          }}
-        >
-          {showAdd ? "✕ Close" : "+ Add place"}
-        </button>
+        <div className="ml-auto flex gap-1.5">
+          <button
+            className={`btn text-xs ${showArchive ? "btn-primary" : ""}`}
+            onClick={() => setShowArchive((v) => !v)}
+            title="Declined places live here"
+          >
+            🗂 Archive{archivedCount ? ` (${archivedCount})` : ""}
+          </button>
+          <button
+            className="btn text-xs"
+            onClick={() => {
+              setShowAdd((v) => !v);
+              setAddQuery("");
+              setAddResults([]);
+            }}
+          >
+            {showAdd ? "✕ Close" : "+ Add place"}
+          </button>
+        </div>
       </div>
+
+      {followUpsDue.length > 0 && !showArchive && (
+        <div className="card border-accent/40 p-3 text-sm">
+          <div className="font-bold">⏰ Follow-ups due</div>
+          <div className="mt-0.5 text-xs text-muted">
+            {followUpsDue.map((d) => d.name).join(" · ")} — open their cards to nudge them
+            or push the date.
+          </div>
+        </div>
+      )}
 
       <input
         className="w-full"
@@ -192,7 +226,7 @@ export default function PipelinePage() {
         </div>
       ) : (
         <div className="-mx-3 flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 sm:-mx-4 sm:px-4">
-          {STAGES.map((stage) => {
+          {visibleStages.map((stage) => {
             const list = byStage.get(stage.id) ?? [];
             return (
               <div

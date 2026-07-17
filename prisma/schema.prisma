@@ -1,0 +1,182 @@
+// NYFoodies — server-side models for the official Instagram DM sync.
+// Inert until DATABASE_URL is configured; the app runs fully on
+// localStorage without it. See docs/instagram-meta-setup.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String?  @unique
+  authProviderId String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  instagramConnections InstagramConnection[]
+  deals                Deal[]
+  conversations        InstagramConversation[]
+  pendingOutreach      PendingOutreach[]
+}
+
+model InstagramConnection {
+  id                   String    @id @default(cuid())
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instagramAccountId   String
+  instagramUsername    String?
+  encryptedAccessToken String
+  tokenExpiresAt       DateTime?
+  permissions          String[]
+  connectionStatus     String    @default("connected") // connected | expired | revoked | error
+  lastSyncedAt         DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  conversations InstagramConversation[]
+
+  @@unique([userId, instagramAccountId])
+  @@index([instagramAccountId])
+}
+
+model Restaurant {
+  id              String   @id @default(cuid())
+  sourceId        String?  @unique // OSM id, e.g. "node/123"
+  name            String
+  instagramHandle String?
+  website         String?
+  address         String?
+  cuisines        String[]
+  priceLevel      Int?
+  phone           String?
+  email           String?
+  lat             Float?
+  lon             Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deals Deal[]
+
+  @@index([instagramHandle])
+}
+
+model Deal {
+  id                         String    @id @default(cuid())
+  userId                     String
+  user                       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurantId               String
+  restaurant                 Restaurant @relation(fields: [restaurantId], references: [id])
+  stage                      String    @default("to_contact")
+  notes                      String?
+  contactedAt                DateTime?
+  respondedAt                DateTime?
+  acceptedAt                 DateTime?
+  followUpAt                 DateTime?
+  instagramScopedRecipientId String?
+  instagramConversationId    String?
+  lastInboundMessageAt       DateTime?
+  lastOutboundMessageAt      DateTime?
+  lastMessagePreview         String?
+  lastMessageDirection       String?
+  lastMessageSeenAt          DateTime?
+  unreadCount                Int       @default(0)
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  conversations   InstagramConversation[]
+  pendingOutreach PendingOutreach[]
+
+  @@index([userId, stage])
+  @@index([instagramScopedRecipientId])
+  @@index([userId, followUpAt])
+}
+
+model InstagramConversation {
+  id                           String    @id @default(cuid())
+  userId                       String
+  user                         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instagramConnectionId        String
+  instagramConnection          InstagramConnection @relation(fields: [instagramConnectionId], references: [id], onDelete: Cascade)
+  dealId                       String?
+  deal                         Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  metaConversationId           String?
+  participantScopedId          String
+  participantUsername          String?
+  participantName              String?
+  participantProfilePictureUrl String?
+  lastMessageAt                DateTime?
+  lastSyncedAt                 DateTime?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  messages InstagramMessage[]
+
+  @@unique([instagramConnectionId, participantScopedId])
+  @@index([userId, lastMessageAt])
+  @@index([metaConversationId])
+  @@index([dealId])
+}
+
+model InstagramMessage {
+  id                 String    @id @default(cuid())
+  conversationId     String
+  conversation       InstagramConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  metaMessageId      String    @unique
+  direction          String // inbound | outbound
+  senderScopedId     String
+  recipientScopedId  String
+  text               String?
+  messageType        String    @default("text")
+  attachmentMetadata Json?
+  sentAt             DateTime
+  seenAt             DateTime?
+  deletedAt          DateTime?
+  rawPayload         Json?
+  createdAt          DateTime  @default(now())
+
+  @@index([conversationId, sentAt])
+}
+
+model PendingOutreach {
+  id                      String    @id @default(cuid())
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dealId                  String
+  deal                    Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  expectedInstagramHandle String?
+  pitchId                 String?
+  exactRenderedMessage    String
+  normalizedMessage       String
+  messageHash             String
+  openedInstagramAt       DateTime
+  matchedMessageId        String?
+  status                  String    @default("awaiting_send") // awaiting_send | matched | expired | needs_review | cancelled
+  expiresAt               DateTime
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([userId, status, openedInstagramAt])
+  @@index([messageHash])
+}
+
+// Database-backed webhook queue: the POST handler verifies + stores fast,
+// processing happens asynchronously. dedupeKey enforces idempotency.
+model WebhookEvent {
+  id           String    @id @default(cuid())
+  dedupeKey    String    @unique // e.g. object:entryId:messageId or payload hash
+  object       String // "instagram"
+  field        String? // messages | messaging_seen | message_reactions | ...
+  payload      Json // redacted payload (no tokens)
+  status       String    @default("pending") // pending | processed | failed | skipped
+  attempts     Int       @default(0)
+  lastError    String?
+  receivedAt   DateTime  @default(now())
+  processedAt  DateTime?
+
+  @@index([status, receivedAt])
+}

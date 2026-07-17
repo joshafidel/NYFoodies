@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { STARTER_TEMPLATES } from "./pitches";
 import { DEFAULT_TEMPLATE, Deal, OfferedTime, Pitch, Settings, Stage } from "./types";
 
 const DEALS_KEY = "nyfoodies.deals.v1";
@@ -159,17 +160,8 @@ export function usePitches() {
   useEffect(() => {
     let stored = readJson<Pitch[]>(PITCHES_KEY, []);
     if (stored.length === 0) {
-      // seed from the legacy single template (or the built-in default)
-      const legacy = readJson<Settings>(SETTINGS_KEY, { template: DEFAULT_TEMPLATE });
-      stored = [
-        {
-          id: uid(),
-          title: "My pitch",
-          body: legacy.template || DEFAULT_TEMPLATE,
-          isDefault: true,
-          updatedAt: Date.now(),
-        },
-      ];
+      // seed new users with the full starter template set
+      stored = STARTER_TEMPLATES.map((t) => ({ ...t, id: uid(), updatedAt: Date.now() }));
       writeJson(PITCHES_KEY, stored);
     }
     setPitches(stored);
@@ -230,7 +222,18 @@ export function usePitches() {
     [save]
   );
 
-  return { pitches, loaded, addPitch, updatePitch, removePitch, setDefault };
+  /** Append any starter templates the user doesn't already have (by title). */
+  const addStarterTemplates = useCallback(() => {
+    const current = readJson<Pitch[]>(PITCHES_KEY, []);
+    const have = new Set(current.map((p) => p.title.toLowerCase()));
+    const missing = STARTER_TEMPLATES.filter((t) => !have.has(t.title.toLowerCase())).map(
+      (t) => ({ ...t, isDefault: false, id: uid(), updatedAt: Date.now() })
+    );
+    if (missing.length > 0) save([...current, ...missing]);
+    return missing.length;
+  }, [save]);
+
+  return { pitches, loaded, addPitch, updatePitch, removePitch, setDefault, addStarterTemplates };
 }
 
 /** The pitch the DM button copies. */
@@ -238,7 +241,3 @@ export function defaultPitch(pitches: Pitch[]): Pitch | undefined {
   return pitches.find((p) => p.isDefault) ?? pitches[0];
 }
 
-/** Fill the pitch template for a given place name. */
-export function fillTemplate(template: string, name: string): string {
-  return template.replaceAll("{name}", name);
-}

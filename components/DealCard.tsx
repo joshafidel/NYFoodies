@@ -3,8 +3,15 @@
 import { useState } from "react";
 import { labelForTag } from "@/lib/cuisines";
 import { priceLabel } from "@/lib/geo";
-import { defaultPitch, fillTemplate, useDeals, usePitches } from "@/lib/store";
-import { Deal, STAGES, Stage } from "@/lib/types";
+import { useDeals, useSettings } from "@/lib/store";
+import { OutreachModal } from "./OutreachModal";
+import {
+  CONTACT_STATUS_LABELS,
+  DEFAULT_FOLLOW_UP_DAYS,
+  Deal,
+  STAGES,
+  Stage,
+} from "@/lib/types";
 
 interface Props {
   deal: Deal;
@@ -17,11 +24,20 @@ function stageIndex(stage: Stage): number {
   return STAGES.findIndex((s) => s.id === stage);
 }
 
+const DAY = 24 * 60 * 60 * 1000;
+
+function toDateInput(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
 export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const { updateDeal, removeDeal, addOfferedTime, removeOfferedTime } = store;
-  const { pitches } = usePitches();
+  const { settings } = useSettings();
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [showOutreach, setShowOutreach] = useState(false);
   const [timeWhen, setTimeWhen] = useState("");
   const [timeNote, setTimeNote] = useState("");
   const [editingHandle, setEditingHandle] = useState(false);
@@ -31,23 +47,22 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const prev = idx > 0 ? STAGES[idx - 1] : null;
   const next = idx < STAGES.length - 1 ? STAGES[idx + 1] : null;
 
-  async function dm() {
-    const pitch = defaultPitch(pitches);
-    const message = fillTemplate(pitch?.body ?? "", deal.name);
-    try {
-      await navigator.clipboard.writeText(message);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      // clipboard can fail on http — the DM thread still opens
-    }
-    if (deal.instagramHandle) {
-      window.open(`https://instagram.com/${deal.instagramHandle}`, "_blank");
-      if (deal.stage === "to_contact") updateDeal(deal.id, { stage: "contacted" });
-    } else {
-      setEditingHandle(true);
-      setOpen(true);
-    }
+  const status = deal.contactStatus ?? "not_contacted";
+  const followUpDays = settings.profile?.followUpDays ?? DEFAULT_FOLLOW_UP_DAYS;
+  const followUpOverdue = deal.followUpAt != null && deal.followUpAt <= Date.now();
+
+  function confirmSent() {
+    updateDeal(deal.id, {
+      stage: deal.stage === "to_contact" ? "contacted" : deal.stage,
+      contactStatus: "confirmed_manual",
+      contactedAt: deal.contactedAt ?? Date.now(),
+      followUpAt: Date.now() + followUpDays * DAY,
+      pendingOutreach: undefined,
+    });
+  }
+
+  function cancelOutreach() {
+    updateDeal(deal.id, { contactStatus: "not_contacted", pendingOutreach: undefined });
   }
 
   function saveHandle() {
@@ -67,16 +82,26 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const showTimes =
     deal.stage === "responded" || deal.stage === "accepted" || deal.offeredTimes.length > 0;
 
+  const statusBadge =
+    status !== "not_contacted" ? (
+      <span
+        className={`tag ${status === "waiting_instagram" ? "" : "tag-green"}`}
+        title="Outreach status"
+      >
+        {CONTACT_STATUS_LABELS[status]}
+      </span>
+    ) : null;
+
   return (
     <div
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className="card cursor-grab space-y-2 p-3 text-sm shadow-sm active:cursor-grabbing"
+      className="card cursor-grab space-y-2 p-3 text-sm active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-1">
         <button
-          className="text-left font-semibold leading-tight hover:text-accent"
+          className="text-left font-bold leading-tight hover:text-accent"
           onClick={() => setOpen((v) => !v)}
           title={open ? "Collapse" : "Expand"}
         >
@@ -87,9 +112,10 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
         ) : null}
       </div>
 
-      {deal.cuisines.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {deal.cuisines.slice(0, 4).map((c) => (
+      {(deal.cuisines.length > 0 || statusBadge) && (
+        <div className="flex flex-wrap items-center gap-1">
+          {statusBadge}
+          {deal.cuisines.slice(0, 3).map((c) => (
             <span key={c} className="tag">
               {labelForTag(c)}
             </span>
@@ -97,9 +123,20 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
         </div>
       )}
 
-      {/* Offered times — always visible once they exist */}
+      {/* Follow-up badge */}
+      {deal.followUpAt != null && status !== "waiting_instagram" && (
+        <div
+          className={`rounded-xl px-2 py-1 text-[11px] font-bold ${
+            followUpOverdue ? "bg-accent text-white" : "bg-accent-soft/60 text-muted"
+          }`}
+        >
+          {followUpOverdue ? "⏰ Follow up now!" : `📅 Follow up ${new Date(deal.followUpAt).toLocaleDateString()}`}
+        </div>
+      )}
+
+      {/* Offered times */}
       {deal.offeredTimes.length > 0 && (
-        <ul className="space-y-1 rounded-lg bg-accent-soft/60 p-2 text-xs">
+        <ul className="space-y-1 rounded-xl bg-accent-soft/60 p-2 text-xs">
           {deal.offeredTimes.map((t) => (
             <li key={t.id} className="flex items-start justify-between gap-1">
               <span>
@@ -118,29 +155,44 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
         </ul>
       )}
 
-      <div className="flex flex-wrap gap-1">
-        <button className="btn btn-primary text-xs" onClick={dm}>
-          {copied ? "Pitch copied ✓" : "💬 DM"}
-        </button>
-        {prev && (
-          <button
-            className="btn text-xs"
-            onClick={() => updateDeal(deal.id, { stage: prev.id })}
-            title={`Move back to ${prev.label}`}
-          >
-            ←
+      {/* Waiting-for-confirmation state */}
+      {status === "waiting_instagram" ? (
+        <div className="space-y-1.5 rounded-xl border-2 border-dashed border-accent/40 p-2">
+          <div className="text-xs font-bold">Did you send the message?</div>
+          <div className="flex gap-1.5">
+            <button className="btn btn-primary flex-1 justify-center text-xs" onClick={confirmSent}>
+              ✓ I sent it
+            </button>
+            <button className="btn flex-1 justify-center text-xs" onClick={cancelOutreach}>
+              Not yet
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          <button className="btn btn-primary text-xs" onClick={() => setShowOutreach(true)}>
+            ✉️ Prepare DM
           </button>
-        )}
-        {next && (
-          <button
-            className="btn text-xs"
-            onClick={() => updateDeal(deal.id, { stage: next.id })}
-            title={`Move to ${next.label}`}
-          >
-            → {next.label}
-          </button>
-        )}
-      </div>
+          {prev && (
+            <button
+              className="btn text-xs"
+              onClick={() => updateDeal(deal.id, { stage: prev.id })}
+              title={`Move back to ${prev.label}`}
+            >
+              ←
+            </button>
+          )}
+          {next && (
+            <button
+              className="btn text-xs"
+              onClick={() => updateDeal(deal.id, { stage: next.id })}
+              title={`Move to ${next.label}`}
+            >
+              → {next.label.split(" ")[0]}
+            </button>
+          )}
+        </div>
+      )}
 
       {open && (
         <div className="space-y-2 border-t border-border pt-2">
@@ -180,6 +232,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
             </div>
           )}
 
+          {deal.email && <div className="text-xs text-muted">📧 {deal.email}</div>}
           {deal.address && <div className="text-xs text-muted">📍 {deal.address}</div>}
           {deal.website && (
             <a
@@ -188,9 +241,34 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
               target="_blank"
               rel="noreferrer"
             >
-              Website ↗
+              🌐 Website
             </a>
           )}
+
+          {/* Follow-up date */}
+          <label className="flex items-center gap-2 text-xs text-muted">
+            Follow up
+            <input
+              type="date"
+              className="text-xs"
+              value={deal.followUpAt ? toDateInput(deal.followUpAt) : ""}
+              onChange={(e) =>
+                updateDeal(deal.id, {
+                  followUpAt: e.target.value
+                    ? new Date(`${e.target.value}T09:00:00`).getTime()
+                    : undefined,
+                })
+              }
+            />
+            {deal.followUpAt != null && (
+              <button
+                className="btn btn-ghost text-xs text-muted"
+                onClick={() => updateDeal(deal.id, { followUpAt: undefined })}
+              >
+                Clear
+              </button>
+            )}
+          </label>
 
           {/* Price editor */}
           <label className="flex items-center gap-2 text-xs text-muted">
@@ -214,7 +292,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
           {/* Offered times editor */}
           {showTimes && (
             <div className="space-y-1">
-              <div className="text-xs font-medium text-muted">Add an offered time</div>
+              <div className="text-xs font-bold text-muted">Add an offered time</div>
               <input
                 className="w-full text-xs"
                 value={timeWhen}
@@ -261,6 +339,10 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
             </button>
           </div>
         </div>
+      )}
+
+      {showOutreach && (
+        <OutreachModal deal={deal} store={store} onClose={() => setShowOutreach(false)} />
       )}
     </div>
   );

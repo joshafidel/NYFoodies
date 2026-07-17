@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { PITCH_VARIABLES } from "@/lib/pitches";
 import { usePitches } from "@/lib/store";
 import { Pitch } from "@/lib/types";
 
 export default function PitchesPage() {
-  const { pitches, loaded, addPitch, updatePitch, removePitch, setDefault } = usePitches();
+  const { pitches, loaded, addPitch, updatePitch, removePitch, setDefault, addStarterTemplates } =
+    usePitches();
   const [openId, setOpenId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [starterMsg, setStarterMsg] = useState("");
 
   const open = pitches.find((p) => p.id === openId) ?? null;
 
@@ -52,8 +55,20 @@ export default function PitchesPage() {
           className="w-full flex-1 resize-none text-[15px] leading-relaxed"
           value={open.body}
           onChange={(e) => updatePitch(open.id, { body: e.target.value })}
-          placeholder={`Write your pitch…\n\nTip: use {name} where the restaurant's name should go — the DM button fills it in automatically.`}
+          placeholder={`Write your pitch…\n\nTip: use variables like {restaurant} and {creator_handle} — they're filled in automatically for each place.`}
         />
+        <div className="flex flex-wrap gap-1">
+          {PITCH_VARIABLES.map((v) => (
+            <button
+              key={v.token}
+              className="chip text-[10px]"
+              title={v.label}
+              onClick={() => updatePitch(open.id, { body: `${open.body} ${v.token}` })}
+            >
+              {v.token}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center justify-between text-[11px] text-muted">
           <span>
             Edited {new Date(open.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
@@ -91,11 +106,24 @@ export default function PitchesPage() {
         </button>
       </div>
       <p className="px-1 text-xs text-muted">
-        Keep every outreach message you use here, ready to copy into Instagram. The{" "}
-        <b>★ default</b> pitch is what the DM button on pipeline cards copies —{" "}
-        <code className="rounded bg-accent-soft px-1">{"{name}"}</code> gets replaced with
-        the restaurant&apos;s name.
+        Your outreach messages, ready for Instagram or email. When you prepare a DM you
+        pick which pitch to use (★ is just the pre-selected one). Variables like{" "}
+        <code className="rounded bg-accent-soft px-1">{"{restaurant}"}</code>,{" "}
+        <code className="rounded bg-accent-soft px-1">{"{cuisine}"}</code> and{" "}
+        <code className="rounded bg-accent-soft px-1">{"{creator_handle}"}</code> fill in
+        automatically — set yours up in <b>Profile</b>.
       </p>
+
+      <button
+        className="btn w-full justify-center text-xs"
+        onClick={() => {
+          const n = addStarterTemplates();
+          setStarterMsg(n > 0 ? `Added ${n} starter template${n === 1 ? "" : "s"} ✓` : "You already have all the starters ✓");
+          setTimeout(() => setStarterMsg(""), 2500);
+        }}
+      >
+        {starterMsg || "✨ Add starter templates (gifted, paid, opening, event, follow-up…)"}
+      </button>
 
       {loaded && pitches.length === 0 && (
         <div className="card p-8 text-center text-sm text-muted">
