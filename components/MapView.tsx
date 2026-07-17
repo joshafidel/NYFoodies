@@ -81,13 +81,24 @@ export default function MapView({ places, origin, emojiFor, inPipeline, onAdd }:
       el.innerHTML = `
         <div class="map-popup-name">${p.name}</div>
         <div class="map-popup-meta">
-          ${formatDistance(p.distanceMeters)}${p.priceLevel ? ` · ${priceLabel(p.priceLevel)}` : ""}
+          ${formatDistance(p.distanceMeters)}${
+            p.priceLevel ? ` · ${p.priceEstimated ? "~" : ""}${priceLabel(p.priceLevel)}` : ""
+          }
           ${p.address ? `<br/>${p.address}` : ""}
         </div>
         <div class="map-popup-tags">${p.cuisines
           .slice(0, 3)
           .map((c) => `<span>${labelForTag(c)}</span>`)
           .join("")}</div>`;
+      if (p.website) {
+        const link = document.createElement("a");
+        link.className = "map-popup-link";
+        link.href = p.website;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = "🌐 Website ↗";
+        el.appendChild(link);
+      }
       const btn = document.createElement("button");
       btn.className = "map-popup-btn";
       btn.textContent = saved ? "✓ In pipeline" : "+ Add to pipeline";

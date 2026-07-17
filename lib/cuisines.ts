@@ -229,6 +229,67 @@ export function priceCategoryFrom(
   return "fine_dining";
 }
 
+// ── Price estimation ──────────────────────────────────────────────────────
+// Open map data rarely carries prices, so when it's missing we estimate the
+// bucket the way you'd guess from a Google result: venue type + cuisine +
+// name signals. Estimates are flagged so the UI can show them as "~$$".
+
+const CHEAP_CUISINES = new Set([
+  "pizza", "bagel", "bagels", "deli", "taco", "tacos", "burrito", "falafel",
+  "shawarma", "kebab", "halal", "donut", "doughnut", "sandwich", "hot_dog",
+  "fried_chicken", "chicken", "empanada", "arepa", "dumpling", "dumplings",
+  "noodle", "pho", "banh_mi", "bubble_tea", "boba", "juice", "smoothie",
+  "ice_cream", "gelato", "frozen_yogurt", "coffee_shop", "coffee", "tea",
+  "bakery", "pastry", "crepe", "pancake", "waffle", "gyro", "souvlaki",
+]);
+
+const CHEAP_GROUPS = new Set(["dessert", "coffee", "bagels", "bakery", "deli", "breakfast"]);
+
+const FINE_CUISINES = new Set([
+  "steak_house", "steak", "sushi", "omakase", "kaiseki", "french", "oyster",
+  "raw_bar", "fine_dining", "tasting_menu",
+]);
+
+const FINE_NAME_WORDS =
+  /\b(steakhouse|steak house|chophouse|omakase|kaiseki|prime|oyster|le |la grenouille|chez |maison|atelier|tasting|michelin|supper club)\b/i;
+
+const CHEAP_NAME_WORDS =
+  /\b(pizza|pizzeria|bagel|deli|taco|taqueria|halal|shack|cart|express|to go|takeout|donut|doughnut|dumpling|noodle|chicken|burger|sub|sandwich|bodega|luncheonette)\b/i;
+
+/**
+ * Estimate {category, level} when real price data is missing.
+ * level: 1 cheap · 2 moderate · 3 fine dining.
+ */
+export function estimatePrice(
+  tags: Record<string, string>,
+  name: string
+): { category: string; level: number } {
+  const amenity = tags["amenity"] ?? "";
+  if (amenity === "fast_food") return { category: "fast_food", level: 1 };
+
+  const rawCuisines = (tags["cuisine"] ?? "")
+    .toLowerCase()
+    .split(";")
+    .map((s) => s.trim().replace(/\s+/g, "_"))
+    .filter(Boolean);
+  const groups = cuisinesFromOsm(tags);
+
+  if (rawCuisines.some((c) => FINE_CUISINES.has(c)) || FINE_NAME_WORDS.test(name)) {
+    return { category: "fine_dining", level: 3 };
+  }
+  if (
+    rawCuisines.some((c) => CHEAP_CUISINES.has(c)) ||
+    groups.some((g) => CHEAP_GROUPS.has(g)) ||
+    CHEAP_NAME_WORDS.test(name) ||
+    amenity === "ice_cream"
+  ) {
+    return { category: "cheap", level: 1 };
+  }
+  if (amenity === "cafe") return { category: "cheap", level: 1 };
+  // restaurants & bars with no other signal: moderate
+  return { category: "moderate", level: 2 };
+}
+
 export const PRICE_CATEGORY_LABELS: Record<string, string> = {
   fast_food: "Fast food",
   cheap: "Cheap ($)",
@@ -244,9 +305,9 @@ export const DIETARY_LABELS: Record<string, string> = {
 };
 
 export const VENUE_LABELS: Record<string, string> = {
-  food: "Food",
-  drinks: "Drinks",
-  food_and_drinks: "Food & Drinks",
+  food: "Restaurant",
+  drinks: "Bar",
+  food_and_drinks: "Restaurant & Bar",
   dessert: "Dessert",
   cafe: "Cafe",
 };

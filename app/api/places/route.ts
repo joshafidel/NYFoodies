@@ -3,6 +3,7 @@ import {
   categoryFromOsm,
   cuisinesFromOsm,
   dietaryFromOsm,
+  estimatePrice,
   mealsFromOsm,
   priceCategoryFrom,
   venueTypesFromOsm,
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
   const lat = parseFloat(req.nextUrl.searchParams.get("lat") ?? "");
   const lon = parseFloat(req.nextUrl.searchParams.get("lon") ?? "");
   const radius = Math.min(
-    5000,
+    8000,
     Math.max(100, parseInt(req.nextUrl.searchParams.get("radius") ?? "1500", 10))
   );
   if (Number.isNaN(lat) || Number.isNaN(lon)) {
@@ -100,7 +101,8 @@ out center tags 400;
         if (seen.has(key)) continue; // node+way duplicates of the same venue
         seen.add(key);
 
-        const priceLevel = priceFromTags(tags);
+        const realPrice = priceFromTags(tags);
+        const est = realPrice == null ? estimatePrice(tags, name) : null;
         places.push({
           id,
           name,
@@ -111,8 +113,9 @@ out center tags 400;
           venueTypes: venueTypesFromOsm(tags),
           meals: mealsFromOsm(tags),
           dietary: dietaryFromOsm(tags),
-          priceCategory: priceCategoryFrom(tags, priceLevel),
-          priceLevel,
+          priceCategory: est ? est.category : priceCategoryFrom(tags, realPrice),
+          priceLevel: realPrice ?? est?.level,
+          priceEstimated: est != null,
           address: buildAddress(tags),
           website: tags["website"] ?? tags["contact:website"],
           phone: tags["phone"] ?? tags["contact:phone"],

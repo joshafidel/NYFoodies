@@ -56,6 +56,8 @@ export interface Place {
   dietary: string[]; // vegan | vegan_options | vegetarian | gluten_free | healthy | ...
   priceCategory?: string; // fast_food | cheap | moderate | fine_dining
   priceLevel?: number;
+  /** true when the price was estimated from venue/cuisine/name signals */
+  priceEstimated?: boolean;
   address?: string;
   website?: string;
   phone?: string;

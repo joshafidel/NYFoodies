@@ -42,7 +42,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
       // clipboard can fail on http — the DM thread still opens
     }
     if (deal.instagramHandle) {
-      window.open(`https://ig.me/m/${deal.instagramHandle}`, "_blank");
+      window.open(`https://instagram.com/${deal.instagramHandle}`, "_blank");
       if (deal.stage === "to_contact") updateDeal(deal.id, { stage: "contacted" });
     } else {
       setEditingHandle(true);

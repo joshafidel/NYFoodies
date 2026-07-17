@@ -100,7 +100,7 @@ export default function PipelinePage() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex h-[calc(100dvh-7.25rem)] flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-bold tracking-tight">Pipeline</h1>
         <span className="text-xs text-muted">
@@ -191,13 +191,13 @@ export default function PipelinePage() {
           move from <b>To Contact</b> all the way to <b>Accepted</b>.
         </div>
       ) : (
-        <div className="-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4">
+        <div className="-mx-3 flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 sm:-mx-4 sm:px-4">
           {STAGES.map((stage) => {
             const list = byStage.get(stage.id) ?? [];
             return (
               <div
                 key={stage.id}
-                className={`flex w-[82vw] max-w-xs shrink-0 snap-center flex-col gap-2 rounded-xl border p-2 transition-colors sm:w-72 sm:snap-align-none ${
+                className={`flex h-full w-[82vw] max-w-xs shrink-0 snap-center flex-col gap-2 rounded-xl border p-2 transition-colors sm:w-72 sm:snap-align-none ${
                   dragOver === stage.id
                     ? "border-accent bg-accent-soft/50"
                     : "border-border bg-card/50"
@@ -218,7 +218,7 @@ export default function PipelinePage() {
                   </div>
                   <div className="text-[11px] text-muted">{stage.hint}</div>
                 </div>
-                <div className="flex min-h-24 flex-col gap-2 overflow-y-auto">
+                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
                   {list.map((deal) => (
                     <DealCard
                       key={deal.id}
@@ -237,9 +237,6 @@ export default function PipelinePage() {
           })}
         </div>
       )}
-      <div className="px-1 text-center text-[11px] text-muted">
-        Swipe sideways to move between stages · drag cards or use the → buttons
-      </div>
     </div>
   );
 }

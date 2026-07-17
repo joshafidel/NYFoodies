@@ -45,6 +45,14 @@ body {
   border-radius: 0.75rem;
 }
 
+button,
+.btn,
+.chip {
+  /* kill double-tap zoom & tap delay so rapid adjacent taps land correctly */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -163,6 +171,14 @@ textarea:focus {
   padding: 1px 7px;
   font-size: 10px;
   font-weight: 600;
+}
+.map-popup-link {
+  display: block;
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
 }
 .map-popup-btn {
   margin-top: 7px;

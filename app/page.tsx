@@ -34,13 +34,12 @@ interface GeoResult {
   lon: number;
 }
 
-const RADII = [
-  { m: 400, label: "0.25 mi" },
-  { m: 800, label: "0.5 mi" },
-  { m: 1600, label: "1 mi" },
-  { m: 3200, label: "2 mi" },
-  { m: 5000, label: "3 mi" },
-];
+const MI = 1609.34;
+
+function radiusLabel(m: number): string {
+  const miles = m / MI;
+  return miles < 1 ? `${(miles).toFixed(2).replace(/0$/, "")} mi` : `${miles.toFixed(1)} mi`;
+}
 
 const VENUE_OPTIONS = ["food", "drinks", "food_and_drinks", "dessert", "cafe"];
 const MEAL_OPTIONS = ["breakfast", "lunch", "dinner"];
@@ -60,10 +59,24 @@ export default function SearchPage() {
   const [error, setError] = useState("");
   const [view, setView] = useState<"list" | "map">("list");
   const [sort, setSort] = useState<SortMode>("distance");
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [cuisineOpen, setCuisineOpen] = useState(false);
+  const [cuisineQuery, setCuisineQuery] = useState("");
   const [addedFlash, setAddedFlash] = useState<string | null>(null);
   const searchedOnce = useRef(false);
+  const cuisineBoxRef = useRef<HTMLDivElement>(null);
+  const radiusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // close the cuisine dropdown when tapping anywhere outside it
+  useEffect(() => {
+    function onPointerDown(e: PointerEvent) {
+      if (cuisineBoxRef.current && !cuisineBoxRef.current.contains(e.target as Node)) {
+        setCuisineOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
 
   // filter state — OR within a category, AND across categories
   const [meals, setMeals] = useState<Set<string>>(new Set());
@@ -281,29 +294,14 @@ export default function SearchPage() {
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn text-xs" onClick={useMyLocation} disabled={loading}>
+          <button className="btn text-xs" onClick={useMyLocation} disabled={loading} title="Optional — you can just type a location instead">
             📍 My location
           </button>
-          <select
-            className="text-xs"
-            value={radius}
-            onChange={(e) => {
-              const r = parseInt(e.target.value, 10);
-              setRadius(r);
-              if (origin) void runSearch(origin, r);
-            }}
-          >
-            {RADII.map((r) => (
-              <option key={r.m} value={r.m}>
-                {r.label}
-              </option>
-            ))}
-          </select>
           <button
             className={`btn text-xs ${activeFilterCount > 0 ? "btn-primary" : ""}`}
             onClick={() => setShowFilters((v) => !v)}
           >
-            ⚙︎ Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+            {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
           </button>
           <div className="ml-auto flex overflow-hidden rounded-lg border border-border text-xs font-medium">
             <button
@@ -319,6 +317,31 @@ export default function SearchPage() {
               🗺️ Map
             </button>
           </div>
+        </div>
+
+        {/* Proximity slider */}
+        <div className="flex items-center gap-3 px-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Within
+          </span>
+          <input
+            type="range"
+            min={400}
+            max={8000}
+            step={400}
+            value={radius}
+            className="min-w-0 flex-1 accent-[var(--accent)]"
+            style={{ padding: 0 }}
+            onChange={(e) => {
+              const r = parseInt(e.target.value, 10);
+              setRadius(r);
+              if (radiusTimer.current) clearTimeout(radiusTimer.current);
+              radiusTimer.current = setTimeout(() => {
+                if (origin) void runSearch(origin, r);
+              }, 500);
+            }}
+          />
+          <span className="w-14 text-right text-xs font-semibold">{radiusLabel(radius)}</span>
         </div>
 
         {geoResults.length > 0 && (
@@ -345,47 +368,59 @@ export default function SearchPage() {
           {chipRow("Price", PRICE_OPTIONS, PRICE_CATEGORY_LABELS, prices, setPrices)}
           {chipRow("Dietary", DIETARY_OPTIONS, DIETARY_LABELS, dietary, setDietary)}
 
-          {/* Cuisine dropdown */}
-          <div>
+          {/* Cuisine combobox — type to filter, tap outside to close */}
+          <div ref={cuisineBoxRef}>
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
               Cuisine
             </div>
+            {cuisines.size > 0 && (
+              <div className="mb-1.5 flex flex-wrap gap-1.5">
+                {[...cuisines].map((c) => (
+                  <button
+                    key={c}
+                    className="chip chip-on"
+                    onClick={() => toggle(cuisines, setCuisines, c)}
+                    title="Remove"
+                  >
+                    {CUISINE_EMOJI[c] ?? "🍽️"} {labelForTag(c)} ✕
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="relative">
-              <button
-                className="btn w-full justify-between text-left text-xs"
-                onClick={() => setCuisineOpen((v) => !v)}
-              >
-                <span className="truncate">
-                  {cuisines.size === 0
-                    ? "Any cuisine"
-                    : [...cuisines].map((c) => labelForTag(c)).join(", ")}
-                </span>
-                <span className="text-muted">{cuisineOpen ? "▲" : "▼"}</span>
-              </button>
+              <input
+                className="w-full text-sm"
+                value={cuisineQuery}
+                placeholder="Search cuisines… (Greek, Italian, Sushi…)"
+                onFocus={() => setCuisineOpen(true)}
+                onChange={(e) => {
+                  setCuisineQuery(e.target.value);
+                  setCuisineOpen(true);
+                }}
+              />
               {cuisineOpen && (
-                <>
-                  <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
-                    {ALL_CUISINE_TAGS.map((c) => (
-                      <button
-                        key={c}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
-                          cuisines.has(c) ? "bg-accent-soft font-semibold text-accent" : ""
-                        }`}
-                        onClick={() => toggle(cuisines, setCuisines, c)}
-                      >
-                        <span>{CUISINE_EMOJI[c] ?? "🍽️"}</span>
-                        <span className="flex-1">{labelForTag(c)}</span>
-                        {cuisines.has(c) && <span>✓</span>}
-                      </button>
-                    ))}
+                <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
+                  {ALL_CUISINE_TAGS.filter((c) =>
+                    labelForTag(c).toLowerCase().includes(cuisineQuery.trim().toLowerCase())
+                  ).map((c) => (
                     <button
-                      className="btn btn-primary mt-1 w-full justify-center text-xs"
-                      onClick={() => setCuisineOpen(false)}
+                      key={c}
+                      className={`flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm ${
+                        cuisines.has(c) ? "bg-accent-soft font-semibold text-accent" : ""
+                      }`}
+                      onClick={() => toggle(cuisines, setCuisines, c)}
                     >
-                      Done
+                      <span>{CUISINE_EMOJI[c] ?? "🍽️"}</span>
+                      <span className="flex-1">{labelForTag(c)}</span>
+                      {cuisines.has(c) && <span>✓</span>}
                     </button>
-                  </div>
-                </>
+                  ))}
+                  {ALL_CUISINE_TAGS.filter((c) =>
+                    labelForTag(c).toLowerCase().includes(cuisineQuery.trim().toLowerCase())
+                  ).length === 0 && (
+                    <div className="px-2 py-2 text-xs text-muted">No cuisines match.</div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -454,7 +489,9 @@ export default function SearchPage() {
                     <div className="truncate font-semibold leading-tight">{p.name}</div>
                     <div className="text-xs text-muted">
                       {formatDistance(p.distanceMeters)}
-                      {p.priceLevel ? ` · ${priceLabel(p.priceLevel)}` : ""}
+                      {p.priceLevel
+                        ? ` · ${p.priceEstimated ? "~" : ""}${priceLabel(p.priceLevel)}`
+                        : ""}
                       {p.priceCategory === "fast_food" ? " · Fast food" : ""}
                       {p.address ? ` · ${p.address}` : ""}
                     </div>
@@ -493,6 +530,16 @@ export default function SearchPage() {
                       rel="noreferrer"
                     >
                       @{p.instagramHandle}
+                    </a>
+                  )}
+                  {p.website && (
+                    <a
+                      className="btn text-xs"
+                      href={p.website}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      🌐 Website
                     </a>
                   )}
                 </div>

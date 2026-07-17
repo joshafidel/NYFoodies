@@ -13,7 +13,7 @@ through a HubSpot-style pipeline — from first message to booked visit.
   dessert, … places can carry multiple tags), sort by distance or by price
   (high → low or low → high).
 - **DM in one tap** — every place has a DM button that copies your pitch
-  template (editable in Settings) and opens their Instagram DM thread. You
+  (managed in the Pitches tab) and opens their Instagram page. You
   paste + send. *(Instagram bans apps that auto-send cold DMs, so this
   copy-and-open flow is the safe, ToS-friendly way.)*
 - **Pipeline** — a drag-and-drop board: **To Contact → Contacted → Responded →
@@ -68,8 +68,9 @@ reconnect when it expires.
 ## Notes on data
 
 - Place data comes from OpenStreetMap. Coverage of NYC venues is very good,
-  but **price levels are often missing** — you can set `$`–`$$$$` on any card
-  in the pipeline, and sorting puts unknown-price places last.
+  but explicit price levels are often missing — when they are, the app
+  estimates cheap/moderate/fine-dining from the venue type, cuisine, and name
+  (shown with a `~`), and you can override the price on any pipeline card.
 - Some venues have their Instagram handle tagged in OSM (shown automatically);
   for the rest, add the handle on the card once and it's saved.
 - Everything you track lives in your browser's localStorage: private, free,
