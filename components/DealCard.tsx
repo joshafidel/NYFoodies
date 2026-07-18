@@ -211,39 +211,42 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-1">
-          {deal.instagramHandle ? (
-            <button className="btn btn-primary text-xs" onClick={openInstagram}>
-              Instagram ↗
-            </button>
-          ) : (
-            <span className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted">
-              No Instagram found
-            </span>
-          )}
-          {deal.website && (
-            <a className="btn text-xs" href={deal.website} target="_blank" rel="noreferrer">
-              Website
-            </a>
-          )}
-          {prev && (
+        <div className="space-y-1">
+          <div className="flex flex-wrap gap-1">
+            {deal.instagramHandle ? (
+              <button className="btn text-xs" onClick={openInstagram}>
+                Instagram ↗
+              </button>
+            ) : (
+              <span className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted">
+                No Instagram found
+              </span>
+            )}
+            {deal.website && (
+              <a className="btn text-xs" href={deal.website} target="_blank" rel="noreferrer">
+                Website ↗
+              </a>
+            )}
+          </div>
+          {/* stage arrows: their own line, side by side */}
+          <div className="flex gap-1">
             <button
-              className="btn text-xs"
-              onClick={() => updateDeal(deal.id, { stage: prev.id })}
-              title={`Move back to ${prev.label}`}
+              className="btn flex-1 justify-center text-xs"
+              onClick={() => prev && updateDeal(deal.id, { stage: prev.id })}
+              disabled={!prev}
+              title={prev ? `Move back to ${prev.label}` : "First stage"}
             >
-              ←
+              ← {prev ? prev.label.split(" ")[0] : ""}
             </button>
-          )}
-          {next && (
             <button
-              className="btn text-xs"
-              onClick={() => updateDeal(deal.id, { stage: next.id })}
-              title={`Move to ${next.label}`}
+              className="btn flex-1 justify-center text-xs"
+              onClick={() => next && updateDeal(deal.id, { stage: next.id })}
+              disabled={!next}
+              title={next ? `Move to ${next.label}` : "Last stage"}
             >
-              → {next.label.split(" ")[0]}
+              {next ? next.label.split(" ")[0] : ""} →
             </button>
-          )}
+          </div>
         </div>
       )}
 

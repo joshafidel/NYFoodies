@@ -117,6 +117,7 @@ export default function DiscoverPage() {
   const [hoursOpen, setHoursOpen] = useState<string | null>(null);
   const searchedOnce = useRef(c?.searchedOnce ?? false);
   const radiusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // filter state — OR within a category, AND across categories
   const [types, setTypes] = useState<Set<string>>(new Set(c?.meals ?? []));
@@ -272,7 +273,7 @@ export default function DiscoverPage() {
     chooseOrigin(g);
   }
 
-  async function runSearch(g: GeoResult, r: number) {
+  async function runSearch(g: GeoResult, r: number, scrollToResults = true) {
     searchedOnce.current = true;
     setLoading(true);
     setError("");
@@ -282,6 +283,10 @@ export default function DiscoverPage() {
       if (!res.ok) throw new Error(json.error ?? "Search failed");
       setPlaces(json.places ?? []);
       if (!json.places?.length) setError("No places found here — try a bigger radius.");
+      else if (scrollToResults) {
+        // let the results render, then bring them into view
+        setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Search failed — try again in a moment.");
     } finally {
@@ -510,7 +515,7 @@ export default function DiscoverPage() {
             placeholder="Neighborhood or zip — or leave empty for all of NYC"
           />
           <button className="btn btn-primary shrink-0" onClick={geocode} disabled={loading}>
-            {loading ? "…" : "Search"}
+            Search
           </button>
         </div>
 
@@ -580,7 +585,7 @@ export default function DiscoverPage() {
               setRadius(r);
               if (radiusTimer.current) clearTimeout(radiusTimer.current);
               radiusTimer.current = setTimeout(() => {
-                if (origin) void runSearch(origin, r);
+                if (origin) void runSearch(origin, r, false);
               }, 500);
             }}
           />
@@ -631,7 +636,7 @@ export default function DiscoverPage() {
             )}
             {section("Type", "type", chips(TYPE_OPTIONS, TYPE_LABELS, types, setTypes), types.size)}
             {section(
-              "Price (per person)",
+              priceTier > 0 ? `Price · ${PRICE_TIERS[priceTier]}` : "Price (per person)",
               "price",
               <div className="space-y-1 px-1">
                 <input
@@ -644,16 +649,13 @@ export default function DiscoverPage() {
                   style={{ padding: 0 }}
                   onChange={(e) => setPriceTier(parseInt(e.target.value, 10))}
                 />
-                <div className="flex justify-between text-[10px] font-bold text-muted">
-                  <span>Any</span>
-                  <span>Fast food</span>
-                  <span>$</span>
-                  <span>$$</span>
-                  <span>$$$</span>
-                  <span>$$$$</span>
-                </div>
-                <div className="text-center text-xs font-extrabold">
-                  {PRICE_TIERS[priceTier]}
+                <div className="flex justify-between whitespace-nowrap text-[10px] font-bold text-muted">
+                  <span className={priceTier === 0 ? "text-accent" : ""}>Any</span>
+                  <span className={priceTier === 1 ? "text-accent" : ""}>Fast food</span>
+                  <span className={priceTier === 2 ? "text-accent" : ""}>$</span>
+                  <span className={priceTier === 3 ? "text-accent" : ""}>$$</span>
+                  <span className={priceTier === 4 ? "text-accent" : ""}>$$$</span>
+                  <span className={priceTier === 5 ? "text-accent" : ""}>$$$$</span>
                 </div>
               </div>,
               priceTier > 0 ? 1 : 0
@@ -701,7 +703,10 @@ export default function DiscoverPage() {
 
       {/* Results header */}
       {places.length > 0 && (
-        <div className="flex items-center gap-2 px-1 text-xs text-muted">
+        <div
+          ref={resultsRef}
+          className="flex scroll-mt-3 items-center gap-2 px-1 text-xs text-muted"
+        >
           <span>
             {filtered.length} of {places.length} places
           </span>
@@ -812,7 +817,7 @@ export default function DiscoverPage() {
                     </span>
                   ) : (
                     <button
-                      className="btn btn-primary text-xs"
+                      className="btn text-xs"
                       onClick={() => openInstagram(p)}
                       disabled={igLoading === p.id}
                     >
