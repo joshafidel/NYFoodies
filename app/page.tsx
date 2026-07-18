@@ -4,10 +4,9 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_CUISINE_TAGS,
+  CUISINE_EMOJI,
   DIETARY_LABELS,
   MEAL_LABELS,
-  PRICE_CATEGORY_LABELS,
-  VENUE_LABELS,
   emojiForPlace,
   labelForTag,
 } from "@/lib/cuisines";
@@ -42,9 +41,25 @@ function radiusLabel(m: number): string {
   return `${Number((m / 1600).toFixed(2))} mi`;
 }
 
-const VENUE_OPTIONS = ["food", "drinks", "food_and_drinks", "dessert", "cafe"];
-const MEAL_OPTIONS = ["breakfast", "lunch", "dinner"];
-const PRICE_OPTIONS = ["fast_food", "cheap", "moderate", "fine_dining", "luxury"];
+const TYPE_OPTIONS = ["breakfast", "lunch", "dinner", "dessert", "cafe", "bar"];
+const TYPE_LABELS: Record<string, string> = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner",
+  dessert: "Dessert",
+  cafe: "Cafe",
+  bar: "Bar",
+};
+/** Slider stops, left to right. Index 0 = no price filter. */
+const PRICE_TIERS = [
+  "Any price",
+  "Fast food · $10–20pp",
+  "$ · $20–40pp",
+  "$$ · $40–70pp",
+  "$$$ · $70–100pp",
+  "$$$$ · $100+pp",
+];
+const TIER_TO_CATEGORY = ["", "fast_food", "cheap", "moderate", "fine_dining", "luxury"];
 const DIETARY_OPTIONS = ["healthy", "gluten_free", "vegan", "vegetarian"];
 
 // ── Tiny inline icons (no emoji) ─────────────────────────────────────────
@@ -104,11 +119,10 @@ export default function DiscoverPage() {
   const radiusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // filter state — OR within a category, AND across categories
-  const [meals, setMeals] = useState<Set<string>>(new Set(c?.meals ?? []));
-  const [prices, setPrices] = useState<Set<string>>(new Set(c?.prices ?? []));
+  const [types, setTypes] = useState<Set<string>>(new Set(c?.meals ?? []));
+  const [priceTier, setPriceTier] = useState<number>(c?.prices?.length ? parseInt(c.prices[0], 10) || 0 : 0);
   const [cuisines, setCuisines] = useState<Set<string>>(new Set(c?.cuisines ?? []));
   const [dietary, setDietary] = useState<Set<string>>(new Set(c?.dietary ?? []));
-  const [venues, setVenues] = useState<Set<string>>(new Set(c?.venues ?? []));
 
   // persist everything so switching tabs never loses the screen
   useEffect(() => {
@@ -121,15 +135,15 @@ export default function DiscoverPage() {
       sort,
       showFilters,
       closedSections: [...closedSections],
-      meals: [...meals],
-      prices: [...prices],
+      meals: [...types],
+      prices: priceTier > 0 ? [String(priceTier)] : [],
       cuisines: [...cuisines],
       dietary: [...dietary],
-      venues: [...venues],
+      venues: [],
       igChecked,
       searchedOnce: searchedOnce.current,
     };
-  }, [locationText, origin, radius, places, view, sort, showFilters, closedSections, meals, prices, cuisines, dietary, venues, igChecked]);
+  }, [locationText, origin, radius, places, view, sort, showFilters, closedSections, types, priceTier, cuisines, dietary, igChecked]);
 
   useEffect(() => {
     if (settingsLoaded && settings.defaultLocation && !origin && !searchedOnce.current) {
@@ -203,12 +217,17 @@ export default function DiscoverPage() {
         return;
       }
       const { latitude, longitude, accuracy } = best.coords;
+      // IP-based fallback fixes (the "thinks I'm in Nebraska" bug) come with
+      // multi-mile uncertainty — reject anything worse than ~3 miles.
       if (
         (Math.abs(latitude) < 0.5 && Math.abs(longitude) < 0.5) ||
-        (accuracy != null && accuracy > 25000)
+        (accuracy != null && accuracy > 5000)
       ) {
         setLoading(false);
-        setError("Your device gave a bad location fix — try again outdoors, or type a neighborhood.");
+        const miles = accuracy ? (accuracy / 1609).toFixed(0) : "?";
+        setError(
+          `Your device only knows your location to within ~${miles} miles (no GPS signal), which isn't good enough — type your address or neighborhood instead.`
+        );
         return;
       }
       // show the user the REAL address the fix resolves to
@@ -273,8 +292,15 @@ export default function DiscoverPage() {
   /** OR within a category, AND across categories. */
   const matches = useCallback(
     (p: Place): boolean => {
-      if (meals.size > 0 && !p.meals.some((m) => meals.has(m))) return false;
-      if (prices.size > 0 && !(p.priceCategory && prices.has(p.priceCategory))) return false;
+      if (types.size > 0) {
+        const ok = [...types].some((t) => {
+          if (t === "bar") return p.venueTypes.includes("drinks");
+          if (t === "dessert" || t === "cafe") return p.venueTypes.includes(t);
+          return p.meals.includes(t); // breakfast / lunch / dinner
+        });
+        if (!ok) return false;
+      }
+      if (priceTier > 0 && p.priceCategory !== TIER_TO_CATEGORY[priceTier]) return false;
       if (cuisines.size > 0 && !p.cuisines.some((cz) => cuisines.has(cz))) return false;
       if (dietary.size > 0) {
         const ok = [...dietary].some(
@@ -282,17 +308,9 @@ export default function DiscoverPage() {
         );
         if (!ok) return false;
       }
-      if (venues.size > 0) {
-        const ok = [...venues].some((v) =>
-          v === "food_and_drinks"
-            ? p.venueTypes.includes("food") && p.venueTypes.includes("drinks")
-            : p.venueTypes.includes(v)
-        );
-        if (!ok) return false;
-      }
       return true;
     },
-    [meals, prices, cuisines, dietary, venues]
+    [types, priceTier, cuisines, dietary]
   );
 
   const filtered = useMemo(() => {
@@ -316,7 +334,7 @@ export default function DiscoverPage() {
   }, [places, matches, sort]);
 
   const activeFilterCount =
-    meals.size + prices.size + cuisines.size + dietary.size + venues.size;
+    types.size + (priceTier > 0 ? 1 : 0) + cuisines.size + dietary.size;
 
   function toggle(set: Set<string>, setter: (s: Set<string>) => void, value: string) {
     const next = new Set(set);
@@ -326,11 +344,10 @@ export default function DiscoverPage() {
   }
 
   function clearFilters() {
-    setMeals(new Set());
-    setPrices(new Set());
+    setTypes(new Set());
+    setPriceTier(0);
     setCuisines(new Set());
     setDietary(new Set());
-    setVenues(new Set());
   }
 
   function dealFieldsFrom(p: Place, handle?: string) {
@@ -612,13 +629,34 @@ export default function DiscoverPage() {
                 Clear all filters
               </button>
             )}
-            {section("Type", "type", chips(VENUE_OPTIONS, VENUE_LABELS, venues, setVenues), venues.size)}
-            {section("Meal", "meal", chips(MEAL_OPTIONS, MEAL_LABELS, meals, setMeals), meals.size)}
+            {section("Type", "type", chips(TYPE_OPTIONS, TYPE_LABELS, types, setTypes), types.size)}
             {section(
               "Price (per person)",
               "price",
-              chips(PRICE_OPTIONS, PRICE_CATEGORY_LABELS, prices, setPrices),
-              prices.size
+              <div className="space-y-1 px-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={1}
+                  value={priceTier}
+                  className="w-full accent-[var(--accent)]"
+                  style={{ padding: 0 }}
+                  onChange={(e) => setPriceTier(parseInt(e.target.value, 10))}
+                />
+                <div className="flex justify-between text-[10px] font-bold text-muted">
+                  <span>Any</span>
+                  <span>Fast food</span>
+                  <span>$</span>
+                  <span>$$</span>
+                  <span>$$$</span>
+                  <span>$$$$</span>
+                </div>
+                <div className="text-center text-xs font-extrabold">
+                  {PRICE_TIERS[priceTier]}
+                </div>
+              </div>,
+              priceTier > 0 ? 1 : 0
             )}
             {section("Dietary", "dietary", chips(DIETARY_OPTIONS, DIETARY_LABELS, dietary, setDietary), dietary.size)}
             {section(
@@ -640,7 +678,7 @@ export default function DiscoverPage() {
                       className={`chip ${cuisines.has(cz) ? "chip-on" : ""}`}
                       onClick={() => toggle(cuisines, setCuisines, cz)}
                     >
-                      {labelForTag(cz)}
+                      {CUISINE_EMOJI[cz] ? `${CUISINE_EMOJI[cz]} ` : ""}{labelForTag(cz)}
                     </button>
                   ))}
                   {ALL_CUISINE_TAGS.filter((cz) =>
