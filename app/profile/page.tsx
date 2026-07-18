@@ -52,6 +52,23 @@ export default function ProfilePage() {
   const [ig, setIg] = useState<IgState | null>(null);
   const [draft, setDraft] = useState<CreatorProfile>({});
   const [saved, setSaved] = useState(false);
+  const [homeDraft, setHomeDraft] = useState("");
+  const [workDraft, setWorkDraft] = useState("");
+  const [slotError, setSlotError] = useState("");
+
+  async function saveSlot(slot: "home" | "work", text: string) {
+    if (!text.trim()) return;
+    setSlotError("");
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(text)}`);
+    const json = await res.json();
+    if (!json.results?.length) {
+      setSlotError("Couldn't find that address — try adding a zip.");
+      return;
+    }
+    update({ [slot]: json.results[0] });
+    if (slot === "home") setHomeDraft("");
+    else setWorkDraft("");
+  }
 
   useEffect(() => {
     fetch("/api/instagram/me")
@@ -90,7 +107,7 @@ export default function ProfilePage() {
 
       {/* Creator profile → pitch variables */}
       <section className="card space-y-2.5 p-4">
-        <h2 className="text-sm font-extrabold">About you 💁</h2>
+        <h2 className="text-sm font-extrabold">About you</h2>
         <p className="text-xs text-muted">
           These fill the variables in your pitches — {"{creator_name}"},{" "}
           {"{creator_handle}"}, {"{audience_size}"}, {"{media_kit}"}, {"{deliverables}"}.
@@ -129,7 +146,7 @@ export default function ProfilePage() {
 
       {/* Instagram */}
       <section className="card space-y-3 p-4">
-        <h2 className="text-sm font-extrabold">Instagram connection 📸</h2>
+        <h2 className="text-sm font-extrabold">Instagram connection</h2>
         {!ig ? (
           <div className="text-sm text-muted">Checking connection…</div>
         ) : ig.connected && ig.profile ? (
@@ -183,7 +200,7 @@ export default function ProfilePage() {
               {ig.error && <span className="mt-1 block text-accent">{ig.error}</span>}
             </p>
             <a href="/api/instagram/login" className="btn btn-primary">
-              📸 Connect Instagram
+              Connect Instagram
             </a>
           </div>
         ) : (
@@ -222,9 +239,51 @@ export default function ProfilePage() {
         )}
       </section>
 
+      {/* Home & Work */}
+      <section className="card space-y-2.5 p-4">
+        <h2 className="text-sm font-extrabold">Home &amp; Work</h2>
+        <p className="text-xs text-muted">
+          Saved addresses for the one-tap buttons on Discover.
+        </p>
+        {(
+          [
+            ["home", homeDraft, setHomeDraft],
+            ["work", workDraft, setWorkDraft],
+          ] as const
+        ).map(([slot, draftVal, setDraftVal]) => (
+          <div key={slot} className="space-y-1">
+            <div className="text-xs font-bold capitalize text-muted">{slot}</div>
+            {settings[slot] && (
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="min-w-0 truncate">{settings[slot]!.label}</span>
+                <button
+                  className="btn btn-ghost shrink-0 text-xs text-muted"
+                  onClick={() => update({ [slot]: undefined })}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+            <div className="flex gap-1.5">
+              <input
+                className="min-w-0 flex-1 text-sm"
+                value={draftVal}
+                onChange={(e) => setDraftVal(e.target.value)}
+                placeholder={settings[slot] ? "Change address…" : `Add your ${slot} address…`}
+                onKeyDown={(e) => e.key === "Enter" && saveSlot(slot, draftVal)}
+              />
+              <button className="btn shrink-0 text-xs" onClick={() => saveSlot(slot, draftVal)}>
+                Save
+              </button>
+            </div>
+          </div>
+        ))}
+        {slotError && <div className="text-xs text-accent">{slotError}</div>}
+      </section>
+
       {/* Location */}
       <section className="card space-y-2 p-4">
-        <h2 className="text-sm font-extrabold">Default search location 📍</h2>
+        <h2 className="text-sm font-extrabold">Default search location</h2>
         <p className="text-sm text-muted">
           {settings.defaultLocation
             ? `Currently: ${settings.defaultLocation.label}`
@@ -239,7 +298,7 @@ export default function ProfilePage() {
 
       {/* Pitches pointer */}
       <section className="card space-y-1 p-4">
-        <h2 className="text-sm font-extrabold">Pitches 📝</h2>
+        <h2 className="text-sm font-extrabold">Pitches</h2>
         <p className="text-sm text-muted">
           Outreach messages live in the{" "}
           <Link href="/pitches" className="text-accent underline">
@@ -252,13 +311,13 @@ export default function ProfilePage() {
 
       {/* Data */}
       <section className="card space-y-2 p-4">
-        <h2 className="text-sm font-extrabold">Your data 🔒</h2>
+        <h2 className="text-sm font-extrabold">Your data</h2>
         <p className="text-sm text-muted">
           Everything is stored in this browser (localStorage) — free, private, no account.
           Clearing browser data clears the app too.
         </p>
         <button className="btn text-xs text-accent" onClick={clearAll}>
-          🗑️ Erase all app data
+          Erase all app data
         </button>
       </section>
     </div>

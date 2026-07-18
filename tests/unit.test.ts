@@ -136,3 +136,41 @@ describe("instagram handle parsing", () => {
     expect(parseHandle("https://example.com/whatever")).toBeNull();
   });
 });
+
+describe("opening hours (am/pm, per-day)", () => {
+  it("converts military time to am/pm", async () => {
+    const { to12h } = await import("../lib/hours");
+    expect(to12h("11:00")).toBe("11am");
+    expect(to12h("22:30")).toBe("10:30pm");
+    expect(to12h("00:00")).toBe("12am");
+    expect(to12h("12:00")).toBe("12pm");
+    expect(to12h("24:00")).toBe("12am");
+  });
+
+  it("parses day ranges and lists", async () => {
+    const { parseOpeningHours } = await import("../lib/hours");
+    const days = parseOpeningHours("Mo-Fr 11:00-22:00; Sa,Su 12:00-23:30");
+    expect(days).not.toBeNull();
+    expect(days![0]).toBe("11am–10pm");
+    expect(days![4]).toBe("11am–10pm");
+    expect(days![5]).toBe("12pm–11:30pm");
+    expect(days![6]).toBe("12pm–11:30pm");
+  });
+
+  it("handles 24/7, split shifts, off days, and wrap-around ranges", async () => {
+    const { parseOpeningHours } = await import("../lib/hours");
+    expect(parseOpeningHours("24/7")![2]).toBe("Open 24 hours");
+    expect(parseOpeningHours("Mo 11:00-14:00,17:00-22:00")![0]).toBe("11am–2pm, 5pm–10pm");
+    expect(parseOpeningHours("Mo-Sa 10:00-20:00; Su off")![6]).toBe("Closed");
+    const wrap = parseOpeningHours("Fr-Mo 10:00-20:00")!;
+    expect(wrap[4]).toBe("10am–8pm"); // Fri
+    expect(wrap[0]).toBe("10am–8pm"); // Mon (wrapped)
+    expect(wrap[1]).toBe("Closed");
+  });
+
+  it("returns null for exotic grammar instead of showing military time", async () => {
+    const { parseOpeningHours } = await import("../lib/hours");
+    expect(parseOpeningHours("Jan-Mar Mo-Fr 10:00-20:00")).toBeNull();
+    expect(parseOpeningHours("sunrise-sunset")).toBeNull();
+  });
+});

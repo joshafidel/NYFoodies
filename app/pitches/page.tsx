@@ -41,7 +41,7 @@ export default function PitchesPage() {
               {open.isDefault ? "★ Default" : "☆ Make default"}
             </button>
             <button className="btn text-xs" onClick={() => copy(open)}>
-              {copiedId === open.id ? "Copied ✓" : "📋 Copy"}
+              {copiedId === open.id ? "Copied ✓" : "Copy"}
             </button>
           </div>
         </div>
@@ -122,7 +122,7 @@ export default function PitchesPage() {
           setTimeout(() => setStarterMsg(""), 2500);
         }}
       >
-        {starterMsg || "✨ Add starter templates (gifted, paid, opening, event, follow-up…)"}
+        {starterMsg || "Add starter templates (gifted, paid, opening, event, follow-up…)"}
       </button>
 
       {loaded && pitches.length === 0 && (
@@ -154,7 +154,7 @@ export default function PitchesPage() {
               </div>
             </button>
             <button className="btn shrink-0 text-xs" onClick={() => copy(p)}>
-              {copiedId === p.id ? "✓" : "📋 Copy"}
+              {copiedId === p.id ? "✓" : "Copy"}
             </button>
           </div>
         ))}

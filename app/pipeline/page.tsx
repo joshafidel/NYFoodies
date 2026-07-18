@@ -127,7 +127,7 @@ export default function PipelinePage() {
             onClick={() => setShowArchive((v) => !v)}
             title="Declined places live here"
           >
-            🗂 Archive{archivedCount ? ` (${archivedCount})` : ""}
+            Archive{archivedCount ? ` (${archivedCount})` : ""}
           </button>
           <button
             className="btn text-xs"
@@ -144,7 +144,7 @@ export default function PipelinePage() {
 
       {followUpsDue.length > 0 && !showArchive && (
         <div className="card border-accent/40 p-3 text-sm">
-          <div className="font-bold">⏰ Follow-ups due</div>
+          <div className="font-bold">Follow-ups due</div>
           <div className="mt-0.5 text-xs text-muted">
             {followUpsDue.map((d) => d.name).join(" · ")} — open their cards to nudge them
             or push the date.

@@ -6,6 +6,42 @@ import { NextRequest, NextResponse } from "next/server";
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
+  const lat = req.nextUrl.searchParams.get("lat");
+  const lon = req.nextUrl.searchParams.get("lon");
+
+  // Reverse geocoding: turn a GPS fix into the real street address
+  if (lat && lon && !q) {
+    try {
+      const params = new URLSearchParams({
+        lat,
+        lon,
+        format: "jsonv2",
+        zoom: "18",
+      });
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+        headers: { "User-Agent": "NYFoodies/1.0 (personal food-collab outreach app)" },
+      });
+      if (!res.ok) {
+        return NextResponse.json({ address: null }, { status: 502 });
+      }
+      const data = (await res.json()) as {
+        display_name?: string;
+        address?: Record<string, string>;
+      };
+      const a = data.address ?? {};
+      const short = [
+        [a.house_number, a.road].filter(Boolean).join(" "),
+        a.neighbourhood ?? a.suburb ?? a.city_district ?? a.borough,
+        a.city ?? a.town ?? a.village,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return NextResponse.json({ address: short || data.display_name || null });
+    } catch {
+      return NextResponse.json({ address: null }, { status: 502 });
+    }
+  }
+
   if (!q) return NextResponse.json({ results: [] });
 
   try {

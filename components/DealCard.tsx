@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { PRICE_RANGE_BY_LEVEL, labelForTag } from "@/lib/cuisines";
 import { priceLabel } from "@/lib/geo";
+import { DAY_NAMES, parseOpeningHours, todayHours } from "@/lib/hours";
 import { useDeals, useSettings } from "@/lib/store";
-import { OutreachModal } from "./OutreachModal";
 import {
   CONTACT_STATUS_LABELS,
   DEFAULT_FOLLOW_UP_DAYS,
@@ -33,30 +33,11 @@ function toDateInput(ms: number): string {
   ).padStart(2, "0")}`;
 }
 
-/** "Mo-Fr 11:00-22:00; Sa 12:00-23:00" → readable lines. */
-function prettyHours(raw: string): string[] {
-  return raw
-    .split(";")
-    .map((s) =>
-      s
-        .trim()
-        .replace(/\bMo\b/g, "Mon")
-        .replace(/\bTu\b/g, "Tue")
-        .replace(/\bWe\b/g, "Wed")
-        .replace(/\bTh\b/g, "Thu")
-        .replace(/\bFr\b/g, "Fri")
-        .replace(/\bSa\b/g, "Sat")
-        .replace(/\bSu\b/g, "Sun")
-    )
-    .filter(Boolean)
-    .slice(0, 4);
-}
-
 export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const { updateDeal, removeDeal, addOfferedTime, removeOfferedTime } = store;
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
-  const [showOutreach, setShowOutreach] = useState(false);
+  const [hoursOpen, setHoursOpen] = useState(false);
   const [timeWhen, setTimeWhen] = useState("");
   const [timeNote, setTimeNote] = useState("");
   const [imgBroken, setImgBroken] = useState(false);
@@ -68,6 +49,20 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const status = deal.contactStatus ?? "not_contacted";
   const followUpDays = settings.profile?.followUpDays ?? DEFAULT_FOLLOW_UP_DAYS;
   const followUpOverdue = deal.followUpAt != null && deal.followUpAt <= Date.now();
+  const today = deal.openingHours ? todayHours(deal.openingHours) : null;
+  const allDays = deal.openingHours ? parseOpeningHours(deal.openingHours) : null;
+
+  /** Straight to their page — and arm the "did you send it?" prompt. */
+  function openInstagram() {
+    if (!deal.instagramHandle) return;
+    window.open(`https://instagram.com/${deal.instagramHandle}`, "_blank");
+    if (status === "not_contacted") {
+      updateDeal(deal.id, {
+        contactStatus: "waiting_instagram",
+        pendingOutreach: { message: "", openedAt: Date.now() },
+      });
+    }
+  }
 
   function confirmSent() {
     updateDeal(deal.id, {
@@ -147,34 +142,26 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
         ))}
       </div>
 
-      {deal.openingHours && (
-        <div className="text-[11px] leading-snug text-muted">
-          🕐 {prettyHours(deal.openingHours).join(" · ")}
+      {today && (
+        <div className="text-[11px] text-muted">
+          <button
+            className="font-semibold"
+            onClick={() => setHoursOpen((v) => !v)}
+          >
+            {today} {allDays ? (hoursOpen ? "▾" : "▸") : ""}
+          </button>
+          {hoursOpen && allDays && (
+            <div className="mt-1 space-y-0.5 rounded-xl bg-accent-soft/40 p-2">
+              {allDays.map((text, i) => (
+                <div key={i} className="flex justify-between gap-3">
+                  <span className="font-semibold">{DAY_NAMES[i]}</span>
+                  <span>{text}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
-
-      {/* Instagram & website — always available */}
-      <div className="flex flex-wrap gap-1">
-        {deal.instagramHandle ? (
-          <a
-            className="btn text-xs"
-            href={`https://instagram.com/${deal.instagramHandle}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Instagram ↗
-          </a>
-        ) : (
-          <button className="btn text-xs" onClick={() => setShowOutreach(true)}>
-            Find Instagram
-          </button>
-        )}
-        {deal.website && (
-          <a className="btn text-xs" href={deal.website} target="_blank" rel="noreferrer">
-            Website ↗
-          </a>
-        )}
-      </div>
 
       {/* Follow-up badge */}
       {deal.followUpAt != null && status !== "waiting_instagram" && (
@@ -184,8 +171,8 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
           }`}
         >
           {followUpOverdue
-            ? "⏰ Follow up now!"
-            : `📅 Follow up ${new Date(deal.followUpAt).toLocaleDateString()}`}
+            ? "Follow up now!"
+            : `Follow up ${new Date(deal.followUpAt).toLocaleDateString()}`}
         </div>
       )}
 
@@ -195,7 +182,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
           {deal.offeredTimes.map((t) => (
             <li key={t.id} className="flex items-start justify-between gap-1">
               <span>
-                🗓️ <b>{t.when}</b>
+                <b>{t.when}</b>
                 {t.note ? <span className="text-muted"> — {t.note}</span> : null}
               </span>
               <button
@@ -213,7 +200,7 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
       {/* Waiting-for-confirmation state */}
       {status === "waiting_instagram" ? (
         <div className="space-y-1.5 rounded-xl border-2 border-dashed border-accent/40 p-2">
-          <div className="text-xs font-bold">Did you send the message?</div>
+          <div className="text-xs font-bold">Did you send the DM?</div>
           <div className="flex gap-1.5">
             <button className="btn btn-primary flex-1 justify-center text-xs" onClick={confirmSent}>
               ✓ I sent it
@@ -225,9 +212,20 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
         </div>
       ) : (
         <div className="flex flex-wrap gap-1">
-          <button className="btn btn-primary text-xs" onClick={() => setShowOutreach(true)}>
-            Message on Instagram ↗
-          </button>
+          {deal.instagramHandle ? (
+            <button className="btn btn-primary text-xs" onClick={openInstagram}>
+              Instagram ↗
+            </button>
+          ) : (
+            <span className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted">
+              No Instagram found
+            </span>
+          )}
+          {deal.website && (
+            <a className="btn text-xs" href={deal.website} target="_blank" rel="noreferrer">
+              Website
+            </a>
+          )}
           {prev && (
             <button
               className="btn text-xs"
@@ -251,8 +249,8 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
 
       {open && (
         <div className="space-y-2 border-t border-border pt-2">
-          {deal.email && <div className="text-xs text-muted">📧 {deal.email}</div>}
-          {deal.address && <div className="text-xs text-muted">📍 {deal.address}</div>}
+          {deal.email && <div className="text-xs text-muted">Email: {deal.email}</div>}
+          {deal.address && <div className="text-xs text-muted">{deal.address}</div>}
 
           {/* Follow-up date */}
           <label className="flex items-center gap-2 text-xs text-muted">
@@ -353,10 +351,6 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
               : `Added ${new Date(deal.createdAt).toLocaleDateString()}`}
           </div>
         </div>
-      )}
-
-      {showOutreach && (
-        <OutreachModal deal={deal} store={store} onClose={() => setShowOutreach(false)} />
       )}
     </div>
   );
