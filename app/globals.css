@@ -13,19 +13,9 @@
   --shadow: 0 2px 14px rgba(120, 80, 50, 0.08);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #211b18;
-    --foreground: #f5ede8;
-    --card: #2d2521;
-    --border: #3e332c;
-    --muted: #b59e91;
-    --accent: #ff8b63;
-    --accent-soft: #47302a;
-    --mint: #24382c;
-    --mint-text: #7fd6a2;
-    --shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
-  }
+/* Light theme only — the app always renders warm & bright. */
+html {
+  color-scheme: light;
 }
 
 @theme inline {

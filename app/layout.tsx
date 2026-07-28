@@ -13,6 +13,11 @@ export const metadata: Metadata = {
   title: "NYFoodies",
   description:
     "Find restaurants & bars, DM them on Instagram, and track collab deals through your pipeline.",
+  appleWebApp: {
+    capable: true,
+    title: "NYFoodies",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {

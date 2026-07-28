@@ -10,7 +10,7 @@ import {
   emojiForPlace,
   labelForTag,
 } from "@/lib/cuisines";
-import { formatDistance, priceLabel } from "@/lib/geo";
+import { formatDistance, haversineMeters, priceLabel } from "@/lib/geo";
 import { DAY_NAMES, parseOpeningHours, todayHours } from "@/lib/hours";
 import { searchCache } from "@/lib/searchCache";
 import { useDeals, useSettings } from "@/lib/store";
@@ -154,6 +154,32 @@ export default function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
 
+  // Auto-discover Instagram handles for visible results by reading each
+  // place's own website (restaurants link their IG in the footer). Runs a
+  // few at a time; results cached in igChecked (null = none found).
+  const enrichInFlight = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (view !== "list") return;
+    const candidates = places
+      .filter(
+        (p) =>
+          !p.instagramHandle &&
+          p.website &&
+          igChecked[p.id] === undefined &&
+          !enrichInFlight.current.has(p.id)
+      )
+      .slice(0, 6);
+    for (const p of candidates) {
+      enrichInFlight.current.add(p.id);
+      fetch(`/api/enrich?url=${encodeURIComponent(p.website!)}`)
+        .then((r) => r.json())
+        .then((j: { instagramHandle?: string | null }) =>
+          setIgChecked((prev) => ({ ...prev, [p.id]: j.instagramHandle ?? null }))
+        )
+        .catch(() => setIgChecked((prev) => ({ ...prev, [p.id]: null })));
+    }
+  }, [places, view, igChecked]);
+
   const dealsBySource = useMemo(() => {
     const map = new Map<string, string>();
     for (const d of deals) if (d.sourceId) map.set(d.sourceId, d.id);
@@ -203,42 +229,70 @@ export default function DiscoverPage() {
     }
     setLoading(true);
 
-    // Watch GPS for up to 6s and keep the most accurate fix instead of
-    // trusting the first coarse (cell-tower/wifi) guess.
-    let best: GeolocationPosition | null = null;
+    // Watch GPS for up to 6s, keep every fix, and only trust the result if
+    // it passes several sanity checks. Garbage fixes ((0,0) "null island" off
+    // Africa, IP-based center-of-US guesses) are singletons with huge error
+    // radii and don't reverse-geocode to a street — so we require:
+    //  1. plausible accuracy (≤ ~3 mi),
+    //  2. agreement between fixes when accuracy is mediocre,
+    //  3. the fix must reverse-geocode to a real address.
+    const fixes: GeolocationPosition[] = [];
     let settled = false;
+
+    const fail = (msg: string) => {
+      setLoading(false);
+      setError(msg);
+    };
 
     const finish = async () => {
       if (settled) return;
       settled = true;
       navigator.geolocation.clearWatch(watchId);
+      const best = fixes.reduce<GeolocationPosition | null>(
+        (a, b) => (!a || b.coords.accuracy < a.coords.accuracy ? b : a),
+        null
+      );
       if (!best) {
-        setLoading(false);
-        setError("Couldn't get your location — you can just type a neighborhood instead.");
+        fail("Couldn't get your location — you can just type a neighborhood instead.");
         return;
       }
       const { latitude, longitude, accuracy } = best.coords;
-      // IP-based fallback fixes (the "thinks I'm in Nebraska" bug) come with
-      // multi-mile uncertainty — reject anything worse than ~3 miles.
       if (
         (Math.abs(latitude) < 0.5 && Math.abs(longitude) < 0.5) ||
         (accuracy != null && accuracy > 5000)
       ) {
-        setLoading(false);
         const miles = accuracy ? (accuracy / 1609).toFixed(0) : "?";
-        setError(
+        fail(
           `Your device only knows your location to within ~${miles} miles (no GPS signal), which isn't good enough — type your address or neighborhood instead.`
         );
         return;
       }
-      // show the user the REAL address the fix resolves to
-      let label = "My location";
+      // mediocre accuracy: demand a second fix that agrees within ~1 mile
+      if (accuracy > 150 && fixes.length >= 2) {
+        const agrees = fixes.some(
+          (f) =>
+            f !== best &&
+            haversineMeters(f.coords.latitude, f.coords.longitude, latitude, longitude) < 1600
+        );
+        if (!agrees) {
+          fail("Your device gave conflicting location readings — type your neighborhood instead.");
+          return;
+        }
+      }
+      // the fix must correspond to a real, nameable place on the map
+      let label = "";
       try {
         const res = await fetch(`/api/geocode?lat=${latitude}&lon=${longitude}`);
         const json = await res.json();
         if (json.address) label = json.address;
       } catch {
-        // keep generic label
+        // handled below
+      }
+      if (!label) {
+        fail(
+          "Couldn't verify your location on the map (the fix didn't match any real address) — type your neighborhood instead."
+        );
+        return;
       }
       const g = { label, lat: latitude, lon: longitude };
       setLocationText(label);
@@ -248,7 +302,7 @@ export default function DiscoverPage() {
 
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        fixes.push(pos);
         if (pos.coords.accuracy <= 50) void finish();
       },
       () => void finish(),
@@ -821,7 +875,11 @@ export default function DiscoverPage() {
                       onClick={() => openInstagram(p)}
                       disabled={igLoading === p.id}
                     >
-                      {igLoading === p.id ? "Finding…" : "Instagram ↗"}
+                      {igLoading === p.id
+                        ? "Finding…"
+                        : (p.instagramHandle ?? igChecked[p.id])
+                          ? `@${p.instagramHandle ?? igChecked[p.id]}`
+                          : "Instagram ↗"}
                     </button>
                   )}
                   {saved ? (
