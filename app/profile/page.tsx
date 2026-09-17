@@ -37,7 +37,7 @@ const FIELDS: {
   type?: string;
 }[] = [
   { key: "creatorName", label: "Your name", placeholder: "Josh" },
-  { key: "creatorHandle", label: "Your Instagram handle", placeholder: "@nyfoodies" },
+  { key: "creatorHandle", label: "Your Instagram handle", placeholder: "@NYCTopRestaurants" },
   { key: "audienceSize", label: "Audience size", placeholder: "25k followers" },
   { key: "mediaKitUrl", label: "Media-kit link", placeholder: "https://…" },
   {

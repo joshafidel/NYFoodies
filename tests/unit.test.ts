@@ -84,7 +84,7 @@ describe("pitch rendering", () => {
   };
   const profile = {
     creatorName: "Josh",
-    creatorHandle: "@nyfoodies",
+    creatorHandle: "@NYCTopRestaurants",
     audienceSize: "25k followers",
     mediaKitUrl: "https://kit.example.com",
     deliverables: "a reel + 3 stories",
@@ -97,7 +97,7 @@ describe("pitch rendering", () => {
       profile
     );
     expect(out).toBe(
-      "Taverna Kyclades|Taverna Kyclades|greek & seafood|Astoria|Josh|@nyfoodies|25k followers|https://kit.example.com|a reel + 3 stories"
+      "Taverna Kyclades|Taverna Kyclades|greek & seafood|Astoria|Josh|@NYCTopRestaurants|25k followers|https://kit.example.com|a reel + 3 stories"
     );
   });
 
