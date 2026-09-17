@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PRICE_RANGE_BY_LEVEL, labelForTag } from "@/lib/cuisines";
 import { priceLabel } from "@/lib/geo";
 import { DAY_NAMES, parseOpeningHours, todayHours } from "@/lib/hours";
+import type { ReplyAnalysis } from "@/lib/llm";
 import { useDeals, useSettings } from "@/lib/store";
 import {
   CONTACT_STATUS_LABELS,
@@ -41,6 +42,10 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const [timeWhen, setTimeWhen] = useState("");
   const [timeNote, setTimeNote] = useState("");
   const [imgBroken, setImgBroken] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<(ReplyAnalysis & { suggestedStage: Stage }) | null>(null);
+  const [analyzeError, setAnalyzeError] = useState("");
 
   const idx = stageIndex(deal.stage);
   const prev = idx > 0 ? STAGES[idx - 1] : null;
@@ -83,6 +88,52 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
     addOfferedTime(deal.id, timeWhen.trim(), timeNote.trim() || undefined);
     setTimeWhen("");
     setTimeNote("");
+  }
+
+  async function analyzeReply() {
+    if (!replyText.trim()) return;
+    setAnalyzing(true);
+    setAnalyzeError("");
+    setAnalysis(null);
+    try {
+      const res = await fetch("/api/ai/classify-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: deal.name, reply: replyText.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setAnalyzeError(json.message ?? "Couldn't analyze the reply — try again.");
+        return;
+      }
+      const stageMap: Record<string, Stage> = {
+        accepted: "accepted",
+        declined: "declined",
+      };
+      setAnalysis({ ...json, suggestedStage: stageMap[json.verdict] ?? "responded" });
+    } catch {
+      setAnalyzeError("Couldn't analyze the reply — try again.");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function applyAnalysis() {
+    if (!analysis) return;
+    updateDeal(deal.id, {
+      stage: analysis.suggestedStage,
+      contactStatus: "responded",
+      respondedAt: deal.respondedAt ?? Date.now(),
+      acceptedAt:
+        analysis.suggestedStage === "accepted" ? (deal.acceptedAt ?? Date.now()) : deal.acceptedAt,
+      followUpAt: undefined, // they replied — cancel the reminder
+      notes: analysis.summary
+        ? `${deal.notes ? `${deal.notes}\n` : ""}AI: ${analysis.summary}`
+        : deal.notes,
+    });
+    for (const t of analysis.offeredTimes) addOfferedTime(deal.id, t);
+    setAnalysis(null);
+    setReplyText("");
   }
 
   const showTimes =
@@ -338,6 +389,45 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
               </div>
             </div>
           )}
+
+          {/* AI reply analyzer */}
+          <div className="space-y-1">
+            <div className="text-xs font-bold text-muted">They replied? Paste it — AI sorts the card</div>
+            <textarea
+              className="w-full text-xs"
+              rows={2}
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder='e.g. "sounds fun! could do Tuesday after 7"'
+            />
+            <button
+              className="btn w-full justify-center text-xs"
+              onClick={analyzeReply}
+              disabled={analyzing || !replyText.trim()}
+            >
+              {analyzing ? "Analyzing…" : "Analyze reply"}
+            </button>
+            {analyzeError && <div className="text-xs text-accent">{analyzeError}</div>}
+            {analysis && (
+              <div className="space-y-1 rounded-xl bg-accent-soft/60 p-2 text-xs">
+                <div>
+                  <b>Sounds like: {analysis.verdict}</b>
+                  {analysis.summary ? ` — ${analysis.summary}` : ""}
+                </div>
+                {analysis.offeredTimes.length > 0 && (
+                  <div className="text-muted">Times offered: {analysis.offeredTimes.join(" · ")}</div>
+                )}
+                <div className="flex gap-1.5">
+                  <button className="btn btn-primary flex-1 justify-center text-xs" onClick={applyAnalysis}>
+                    Move to {STAGES.find((s) => s.id === analysis.suggestedStage)?.label}
+                  </button>
+                  <button className="btn text-xs" onClick={() => setAnalysis(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Notes */}
           <textarea

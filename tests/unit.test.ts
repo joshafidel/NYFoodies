@@ -174,3 +174,30 @@ describe("opening hours (am/pm, per-day)", () => {
     expect(parseOpeningHours("sunrise-sunset")).toBeNull();
   });
 });
+
+describe("router LLM helpers", () => {
+  it("extracts JSON from fenced, bare, and prose-wrapped replies", async () => {
+    const { extractJson } = await import("../lib/llm");
+    expect(extractJson('```json\n{"verdict":"accepted"}\n```')).toEqual({ verdict: "accepted" });
+    expect(extractJson('{"verdict":"declined"}')).toEqual({ verdict: "declined" });
+    expect(extractJson('Sure! Here you go: {"a":1} hope that helps')).toEqual({ a: 1 });
+    expect(extractJson("no json here")).toBeNull();
+  });
+
+  it("maps verdicts to pipeline stages (any reply is at least Responded)", async () => {
+    const { stageForVerdict } = await import("../lib/llm");
+    expect(stageForVerdict("accepted")).toBe("accepted");
+    expect(stageForVerdict("declined")).toBe("declined");
+    expect(stageForVerdict("negotiating")).toBe("responded");
+    expect(stageForVerdict("question")).toBe("responded");
+    expect(stageForVerdict("other")).toBe("responded");
+  });
+
+  it("reports unconfigured without a key and never needs one at import", async () => {
+    const { llmConfigured } = await import("../lib/llm");
+    const saved = process.env.PERPLEXITY_API_KEY;
+    delete process.env.PERPLEXITY_API_KEY;
+    expect(llmConfigured()).toBe(false);
+    if (saved) process.env.PERPLEXITY_API_KEY = saved;
+  });
+});
