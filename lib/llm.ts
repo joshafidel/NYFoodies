@@ -78,6 +78,41 @@ export interface ReplyAnalysis {
   summary: string;
 }
 
+/**
+ * Zero-setup fallback classifier — keyword rules, no API key, no network.
+ * Used whenever the Router API isn't configured or errors, so the
+ * "Analyze reply" feature always works.
+ */
+export function heuristicClassify(replyText: string): ReplyAnalysis {
+  const t = replyText.toLowerCase();
+
+  // "Tuesday", "tues 7:30pm", "7pm", "sat around 6"
+  const timeRe =
+    /\b(?:mon|tues?|wed(?:nes)?|thur?s?|fri|satur?|sun)(?:day)?s?\b(?:[^.,;!?\n]{0,25}?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi;
+  const offeredTimes = [...new Set((replyText.match(timeRe) ?? []).map((s) => s.trim()))]
+    .filter((s) => s.length > 2)
+    .slice(0, 5);
+
+  const declined =
+    /(not interested|no thanks?|unfortunately|can'?t (?:do|host|accommodate)|pass on this|not (?:a good|the right) fit|we'?ll pass|don'?t do collab|no longer|decline)/;
+  const accepted =
+    /(sounds (?:good|great|fun|perfect|awesome)|let'?s do it|would love to host|we'?d love|come (?:by|in|on in|through)|works for us|see you (?:then|there)|you'?re welcome to|absolutely|for sure|happy to host|yes,? (?:that|we|let))/;
+  const negotiating =
+    /(instead|how about|could (?:we|you) do|would.*work\?|prefer|only if|depends|what if|another (?:day|time)|reschedule)/;
+  const question =
+    /(how many follower|what (?:do you|would you|are your)|which|rates?|price|cost|what'?s your|can you (?:send|share)|more (?:info|details))/;
+
+  let verdict: ReplyVerdict;
+  if (declined.test(t)) verdict = "declined";
+  else if (accepted.test(t)) verdict = "accepted";
+  else if (negotiating.test(t) || (offeredTimes.length > 0 && /\?/.test(t))) verdict = "negotiating";
+  else if (question.test(t) || /\?/.test(t)) verdict = "question";
+  else if (offeredTimes.length > 0) verdict = "accepted";
+  else verdict = "other";
+
+  return { verdict, offeredTimes, summary: "" };
+}
+
 /** Which pipeline stage a verdict suggests. Any reply is at least Responded. */
 export function stageForVerdict(verdict: ReplyVerdict): "accepted" | "declined" | "responded" {
   if (verdict === "accepted") return "accepted";

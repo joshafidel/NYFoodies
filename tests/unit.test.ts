@@ -201,3 +201,29 @@ describe("router LLM helpers", () => {
     if (saved) process.env.PERPLEXITY_API_KEY = saved;
   });
 });
+
+describe("heuristic reply classifier (zero-setup fallback)", () => {
+  it("detects acceptance with offered times", async () => {
+    const { heuristicClassify } = await import("../lib/llm");
+    const r = heuristicClassify("Sounds great! Come by Tuesday 7:30pm or Sunday around 6pm");
+    expect(r.verdict).toBe("accepted");
+    expect(r.offeredTimes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("detects declines", async () => {
+    const { heuristicClassify } = await import("../lib/llm");
+    expect(heuristicClassify("thanks but we're not interested right now").verdict).toBe("declined");
+    expect(heuristicClassify("Unfortunately we can't host this month").verdict).toBe("declined");
+  });
+
+  it("detects questions and negotiation", async () => {
+    const { heuristicClassify } = await import("../lib/llm");
+    expect(heuristicClassify("how many followers do you have?").verdict).toBe("question");
+    expect(heuristicClassify("could we do the week after instead?").verdict).toBe("negotiating");
+  });
+
+  it("falls back to other for noise", async () => {
+    const { heuristicClassify } = await import("../lib/llm");
+    expect(heuristicClassify("🔥🔥🔥").verdict).toBe("other");
+  });
+});

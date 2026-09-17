@@ -44,7 +44,9 @@ export function DealCard({ deal, store, onDragStart, onDragEnd }: Props) {
   const [imgBroken, setImgBroken] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<(ReplyAnalysis & { suggestedStage: Stage }) | null>(null);
+  const [analysis, setAnalysis] = useState<
+    (ReplyAnalysis & { suggestedStage: Stage; engine?: string }) | null
+  >(null);
   const [analyzeError, setAnalyzeError] = useState("");
 
   const idx = stageIndex(deal.stage);
